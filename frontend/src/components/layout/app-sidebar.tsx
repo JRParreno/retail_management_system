@@ -170,11 +170,11 @@ export function AppSidebar({ user }: { user: User }) {
 
   return (
     <>
-      <aside className="no-print hidden h-dvh w-60 shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:flex">
+      <aside className="no-print hidden h-full w-60 shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:flex">
         <SidebarChrome user={user} />
       </aside>
 
-      <div className="no-print sticky top-0 z-40 flex items-center gap-3 border-b bg-card/90 px-3 py-2 backdrop-blur lg:hidden">
+      <div className="no-print z-40 flex shrink-0 items-center gap-3 border-b bg-card/90 px-3 py-2 backdrop-blur lg:hidden">
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetTrigger
             className={cn(
