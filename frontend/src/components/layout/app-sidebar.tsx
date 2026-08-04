@@ -92,10 +92,10 @@ function BranchControl() {
   }
 
   return (
-    <div className="space-y-1 px-1">
+    <div className="min-w-0 space-y-1 px-1">
       <p className="px-2 text-xs text-sidebar-foreground/50">Active branch</p>
       <SearchableCombobox
-        className="bg-sidebar-accent/40 text-sidebar-foreground"
+        className="w-full min-w-0 bg-sidebar-accent/40 text-sidebar-foreground"
         value={activeBranch.id}
         onValueChange={setActiveBranchId}
         placeholder="Select branch"
@@ -110,9 +110,14 @@ function BranchControl() {
   );
 }
 
-export function AppSidebar({ user }: { user: User }) {
+function SidebarChrome({
+  user,
+  onNavigate,
+}: {
+  user: User;
+  onNavigate?: () => void;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -120,43 +125,53 @@ export function AppSidebar({ user }: { user: User }) {
     router.refresh();
   }
 
-  const brand = (
-    <div className="flex items-center gap-2 border-b border-sidebar-border px-4 py-4">
-      <div className="flex size-10 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-        <Bike className="size-5" />
+  return (
+    <>
+      <div className="shrink-0 border-b border-sidebar-border px-4 py-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+            <Bike className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold tracking-tight text-sidebar-foreground">
+              MotoShop RMS
+            </p>
+            <p className="truncate text-xs text-sidebar-foreground/60">
+              {user.full_name}
+            </p>
+          </div>
+        </div>
       </div>
-      <div>
-        <p className="text-sm font-semibold tracking-tight text-sidebar-foreground">
-          MotoShop RMS
-        </p>
-        <p className="text-xs text-sidebar-foreground/60">{user.full_name}</p>
-      </div>
-    </div>
-  );
 
-  const footer = (
-    <div className="mt-auto space-y-3 border-t border-sidebar-border p-3">
-      <BranchControl />
-      <p className="px-2 text-xs text-sidebar-foreground/50">
-        {user.role} · @{user.username}
-      </p>
-      <Button
-        variant="secondary"
-        className="w-full min-h-11 justify-start gap-2"
-        onClick={logout}
-      >
-        <LogOut className="size-4" />
-        Sign out
-      </Button>
-    </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <NavLinks user={user} onNavigate={onNavigate} />
+      </div>
+
+      <div className="shrink-0 space-y-3 border-t border-sidebar-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <BranchControl />
+        <p className="truncate px-2 text-xs text-sidebar-foreground/50">
+          {user.role} · @{user.username}
+        </p>
+        <Button
+          variant="secondary"
+          className="h-11 w-full min-w-0 justify-start gap-2 px-3"
+          onClick={logout}
+        >
+          <LogOut className="size-4 shrink-0" />
+          <span className="truncate">Sign out</span>
+        </Button>
+      </div>
+    </>
   );
+}
+
+export function AppSidebar({ user }: { user: User }) {
+  const [open, setOpen] = useState(false);
 
   return (
     <>
-      <aside className="no-print hidden h-dvh w-60 shrink-0 flex-col bg-sidebar text-sidebar-foreground lg:flex">
-        {brand}
-        <NavLinks user={user} />
-        {footer}
+      <aside className="no-print hidden h-dvh w-60 shrink-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground lg:flex">
+        <SidebarChrome user={user} />
       </aside>
 
       <div className="no-print sticky top-0 z-40 flex items-center gap-3 border-b bg-card/90 px-3 py-2 backdrop-blur lg:hidden">
@@ -170,11 +185,12 @@ export function AppSidebar({ user }: { user: User }) {
           </SheetTrigger>
           <SheetContent
             side="left"
-            className="w-72 bg-sidebar p-0 text-sidebar-foreground"
+            className="flex h-dvh w-72 max-w-[85vw] flex-col gap-0 overflow-hidden bg-sidebar p-0 text-sidebar-foreground"
           >
-            {brand}
-            <NavLinks user={user} onNavigate={() => setOpen(false)} />
-            {footer}
+            <SidebarChrome
+              user={user}
+              onNavigate={() => setOpen(false)}
+            />
           </SheetContent>
         </Sheet>
         <div className="flex min-w-0 flex-1 items-center gap-2">
