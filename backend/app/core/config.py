@@ -12,6 +12,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Motorcycle Shop RMS"
     DEBUG: bool = False
+    LOG_LEVEL: str = "INFO"
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/rms"
     SECRET_KEY: str = "change-me-to-a-long-random-string"
     ALGORITHM: str = "HS256"

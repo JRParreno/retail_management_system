@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -73,6 +74,7 @@ function matchesSearch(job: Transaction, q: string) {
 }
 
 function JobsBoardInner() {
+  const router = useRouter();
   const [jobs, setJobs] = useState<Transaction[]>([]);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("OPEN");
@@ -198,31 +200,33 @@ function JobsBoardInner() {
               const bike = [job.motorcycle_model, job.motorcycle_color]
                 .filter(Boolean)
                 .join(" · ");
+              const href = `/jobs/${job.id}`;
               return (
                 <tr
                   key={job.id}
-                  className="border-b last:border-0 hover:bg-muted/30"
+                  role="link"
+                  tabIndex={0}
+                  className="cursor-pointer border-b last:border-0 hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none"
+                  onClick={() => router.push(href)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(href);
+                    }
+                  }}
                 >
                   <td className="px-3 py-2.5">
-                    <Link
-                      href={`/jobs/${job.id}`}
-                      className="font-semibold hover:underline"
-                    >
+                    <span className="font-semibold">
                       {job.plate_number?.trim() || "No plate"}
-                    </Link>
+                    </span>
                     {job.diagnosis_notes?.trim() ? (
                       <p className="line-clamp-1 text-xs text-muted-foreground">
                         {job.diagnosis_notes}
                       </p>
                     ) : null}
                   </td>
-                  <td className="px-3 py-2.5">
-                    <Link
-                      href={`/jobs/${job.id}`}
-                      className="text-muted-foreground hover:underline"
-                    >
-                      {job.document_number}
-                    </Link>
+                  <td className="px-3 py-2.5 text-muted-foreground">
+                    {job.document_number}
                   </td>
                   <td className="px-3 py-2.5">{job.customer_name || "—"}</td>
                   <td className="px-3 py-2.5 text-muted-foreground">
