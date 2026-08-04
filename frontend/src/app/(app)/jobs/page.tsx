@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,12 @@ const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: "CANCELLED", label: "Cancelled" },
   { value: "ALL", label: "All statuses" },
 ];
+
+function parseStatusFilter(value: string | null): StatusFilter {
+  if (!value) return "OPEN";
+  const match = STATUS_OPTIONS.find((o) => o.value === value);
+  return match ? match.value : "OPEN";
+}
 
 function formatStarted(value: string | null | undefined) {
   if (!value) return "—";
@@ -75,10 +81,26 @@ function matchesSearch(job: Transaction, q: string) {
 
 function JobsBoardInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [jobs, setJobs] = useState<Transaction[]>([]);
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("OPEN");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() =>
+    parseStatusFilter(searchParams.get("status")),
+  );
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setStatusFilter(parseStatusFilter(searchParams.get("status")));
+  }, [searchParams]);
+
+  function updateStatusFilter(next: StatusFilter) {
+    setStatusFilter(next);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "OPEN") params.delete("status");
+    else params.set("status", next);
+    const qs = params.toString();
+    router.replace(qs ? `/jobs?${qs}` : "/jobs");
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,7 +184,7 @@ function JobsBoardInner() {
         <SearchableCombobox
           className="lg:w-72"
           value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+          onValueChange={(v) => updateStatusFilter(v as StatusFilter)}
           placeholder="Filter status"
           searchPlaceholder="Status…"
           options={STATUS_OPTIONS.map((o) => ({

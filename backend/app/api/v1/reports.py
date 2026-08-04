@@ -56,6 +56,8 @@ def report_summary(
     ticket_count = len(transactions)
     mechanic_totals: dict[UUID, dict[str, Decimal]] = {}
 
+    # Historical integrity: use line snapshots only — never Product.current_*
+    # or BranchPrice. Changing catalog/branch prices must not rewrite past tickets.
     for txn in transactions:
         for line in txn.part_lines:
             parts_sales += line.actual_selling_price * line.quantity

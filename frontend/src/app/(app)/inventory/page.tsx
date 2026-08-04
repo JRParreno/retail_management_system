@@ -1,8 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileDown } from "lucide-react";
+import { FileDown, Plus, Printer } from "lucide-react";
+import { toast } from "sonner";
 
+import { AddProductDialog } from "@/components/inventory/add-product-dialog";
+import {
+  BarcodeLabelPrintDialog,
+  type BarcodeLabelData,
+} from "@/components/inventory/barcode-label-print";
+import { EditProductDialog } from "@/components/inventory/edit-product-dialog";
 import { useBranch } from "@/components/branch/branch-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,7 +38,8 @@ function formatSnapshotFileStamp(date: Date) {
 }
 
 export default function InventoryPage() {
-  const { activeBranch } = useBranch();
+  const { activeBranch, user } = useBranch();
+  const isAdmin = user?.role === "ADMIN";
   const [items, setItems] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -42,6 +50,9 @@ export default function InventoryPage() {
   const [adjustId, setAdjustId] = useState<string | null>(null);
   const [delta, setDelta] = useState("0");
   const [snapshotAt, setSnapshotAt] = useState(() => new Date());
+  const [addOpen, setAddOpen] = useState(false);
+  const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [printLabel, setPrintLabel] = useState<BarcodeLabelData | null>(null);
 
   const categoryName = useMemo(() => {
     if (categoryId === "all") return "All categories";
@@ -93,14 +104,24 @@ export default function InventoryPage() {
   }, [categoryId, brand]);
 
   async function adjust(productId: string) {
+    const qtyDelta = Number(delta);
+    if (!Number.isInteger(qtyDelta) || qtyDelta === 0) {
+      toast.error("Enter a non-zero whole number (e.g. +5 or -2)");
+      return;
+    }
+    const product = items.find((p) => p.id === productId);
     try {
       await clientApi(`/products/${productId}/adjust`, {
         method: "POST",
         body: JSON.stringify({
-          quantity_delta: Number(delta),
+          quantity_delta: qtyDelta,
           reason: "Manual adjustment",
         }),
       });
+      const after = (product?.stock_qty ?? 0) + qtyDelta;
+      toast.success(
+        `Stock updated${product ? `: ${product.stock_qty} → ${after}` : ""}`,
+      );
       setAdjustId(null);
       setDelta("0");
       await load();
@@ -129,17 +150,29 @@ export default function InventoryPage() {
           <p className="text-sm text-muted-foreground">
             Search and filter by brand, category, name, or barcode — export PDF
             for stock audits
+            {isAdmin ? ". Admins can add products by scanning the real barcode." : ""}
           </p>
         </div>
-        <Button
-          className="no-print min-h-11 gap-2"
-          variant="outline"
-          disabled={!items.length}
-          onClick={exportPdf}
-        >
-          <FileDown className="size-4" />
-          Export PDF
-        </Button>
+        <div className="no-print flex flex-wrap gap-2">
+          {isAdmin ? (
+            <Button
+              className="min-h-11 gap-2"
+              onClick={() => setAddOpen(true)}
+            >
+              <Plus className="size-4" />
+              Add product
+            </Button>
+          ) : null}
+          <Button
+            className="min-h-11 gap-2"
+            variant="outline"
+            disabled={!items.length}
+            onClick={exportPdf}
+          >
+            <FileDown className="size-4" />
+            Export PDF
+          </Button>
+        </div>
       </div>
 
       <div className="no-print flex flex-col gap-2 lg:flex-row">
@@ -212,24 +245,67 @@ export default function InventoryPage() {
                 </td>
                 <td className="px-3 py-3 text-right">
                   {adjustId === p.id ? (
-                    <div className="flex justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        ± qty
+                      </span>
                       <Input
                         className="h-9 w-20"
+                        inputMode="numeric"
+                        placeholder="+5"
                         value={delta}
                         onChange={(e) => setDelta(e.target.value)}
                       />
                       <Button size="sm" onClick={() => adjust(p.id)}>
-                        Save
+                        Apply
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setAdjustId(null);
+                          setDelta("0");
+                        }}
+                      >
+                        Cancel
                       </Button>
                     </div>
                   ) : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setAdjustId(p.id)}
-                    >
-                      Adjust
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setPrintLabel({
+                            barcode: p.barcode,
+                            name: p.name,
+                            priceLabel: formatPeso(p.current_selling_price),
+                          })
+                        }
+                      >
+                        <Printer className="size-3.5" />
+                        Label
+                      </Button>
+                      {isAdmin ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setEditProduct(p)}
+                        >
+                          Edit
+                        </Button>
+                      ) : null}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setAdjustId(p.id);
+                          setDelta("0");
+                        }}
+                      >
+                        Adjust
+                      </Button>
+                    </div>
                   )}
                 </td>
               </tr>
@@ -317,6 +393,39 @@ export default function InventoryPage() {
           </div>
         </div>
       </div>
+
+      {isAdmin ? (
+        <>
+          <AddProductDialog
+            open={addOpen}
+            onOpenChange={setAddOpen}
+            categories={categories}
+            onCategoriesChanged={setCategories}
+            onCreated={() => {
+              void load();
+            }}
+          />
+          <EditProductDialog
+            product={editProduct}
+            open={editProduct != null}
+            onOpenChange={(open) => {
+              if (!open) setEditProduct(null);
+            }}
+            categories={categories}
+            onSaved={() => {
+              void load();
+            }}
+          />
+        </>
+      ) : null}
+
+      <BarcodeLabelPrintDialog
+        open={printLabel != null}
+        onOpenChange={(open) => {
+          if (!open) setPrintLabel(null);
+        }}
+        label={printLabel}
+      />
     </div>
   );
 }

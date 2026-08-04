@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
+import secrets
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
@@ -158,6 +159,28 @@ def list_brands(
     return [b for b in rows if b]
 
 
+@router.post("/products/barcode/generate")
+def generate_product_barcode(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+) -> dict[str, str]:
+    """Issue a unique internal barcode for parts without a manufacturer code.
+
+    Path is intentionally nested under /barcode/ so it cannot be captured by
+    GET /products/{product_id}.
+    """
+    for _ in range(32):
+        # RMS + 12 digits — unique, printable, gun/camera friendly
+        candidate = f"RMS{secrets.randbelow(10**12):012d}"
+        exists = db.scalar(select(Product.id).where(Product.barcode == candidate))
+        if exists is None:
+            return {"barcode": candidate}
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not generate a unique barcode — try again",
+    )
+
+
 @router.get("/products", response_model=PaginatedResponse[ProductRead])
 def list_products(
     q: str | None = Query(default=None),
@@ -275,31 +298,32 @@ def update_product(
     _: User = Depends(require_role(Role.ADMIN)),
     active_branch_id: UUID = Depends(get_active_branch_id),
 ) -> ProductRead:
+    """Update catalog fields for future sales only.
+
+    Paid tickets keep `cost_price_snapshot` / `actual_selling_price` on their
+    line items, so changing cost or sell price here does not rewrite reports.
+    Stock quantity is changed via `/adjust` (or opening stock on create).
+    """
     product = db.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     data = body.model_dump(exclude_unset=True)
-    if "barcode" in data and data["barcode"] is not None:
-        clash = db.scalar(
-            select(Product).where(
-                Product.barcode == data["barcode"],
-                Product.id != product_id,
-            )
+    # Locked after create — accidental barcode/category changes cause messy
+    # inventory history and support confusion. Name/brand/prices remain editable.
+    if "barcode" in data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Barcode cannot be changed after create",
         )
-        if clash is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Barcode already exists",
-            )
-    if "category_id" in data and data["category_id"] is not None:
-        if db.get(ProductCategory, data["category_id"]) is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Category not found",
-            )
+    if "category_id" in data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category cannot be changed after create — set it when adding the product",
+        )
     # stock_qty on the active branch is managed via BranchStock / the /adjust
     # endpoint, not this catalog-level update.
     data.pop("stock_qty", None)
+    selling_price = data.get("current_selling_price")
     for key, value in data.items():
         setattr(product, key, value)
     if "min_stock_threshold" in data:
@@ -307,6 +331,25 @@ def update_product(
             db, branch_id=active_branch_id, product=product
         )
         branch_stock.min_stock_threshold = data["min_stock_threshold"]
+    # Keep this branch's sell price in sync if a BranchPrice override exists,
+    # or create one so the active branch reflects the new catalog price.
+    if selling_price is not None:
+        override = db.scalar(
+            select(BranchPrice).where(
+                BranchPrice.branch_id == active_branch_id,
+                BranchPrice.product_id == product.id,
+            )
+        )
+        if override is None:
+            db.add(
+                BranchPrice(
+                    branch_id=active_branch_id,
+                    product_id=product.id,
+                    selling_price=selling_price,
+                )
+            )
+        else:
+            override.selling_price = selling_price
     db.commit()
     db.refresh(product)
     return _overlay_products(db, [product], active_branch_id)[0]
