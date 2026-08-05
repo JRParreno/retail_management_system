@@ -86,30 +86,54 @@ def run(
     return result.returncode
 
 
-def which_or_fail(name: str, *, win_alt: str | None = None) -> str:
-    path = shutil.which(name) or (shutil.which(win_alt) if win_alt else None)
-    if not path:
-        raise SystemExit(f"Missing required tool: {name}")
-    return path
+def which_or_fail(name: str, *, alts: list[str] | None = None) -> str:
+    candidates = [name, *(alts or [])]
+    for cand in candidates:
+        path = shutil.which(cand)
+        if path:
+            return path
+    raise SystemExit(
+        f"Missing required tool: {name}"
+        + (f" (also tried: {', '.join(alts)})" if alts else "")
+    )
+
+
+def host_python() -> str:
+    """Python used to run this script, or python3/python/py on PATH."""
+    if sys.executable:
+        return sys.executable
+    for name in ("python3", "python", "py"):
+        path = shutil.which(name)
+        if path:
+            return path
+    raise SystemExit(
+        "Missing required tool: Python 3 (install python3, or run via `python3 scripts/prod_deploy.py`)"
+    )
 
 
 def check_requirements() -> None:
     print("\n=== Checking requirements ===")
-    which_or_fail("python" if not IS_WIN else "py", win_alt="python")
+    host_py = host_python()
     which_or_fail("node")
-    which_or_fail(npm_cmd())
+    which_or_fail(npm_cmd(), alts=["npm"])
     which_or_fail("docker")
 
+    try:
+        py_v = subprocess.check_output(
+            [host_py, "--version"], text=True, stderr=subprocess.STDOUT
+        ).strip()
+    except Exception:
+        py_v = "Python 3"
     node_v = subprocess.check_output(
         ["node", "-v"], text=True, stderr=subprocess.STDOUT
     ).strip()
     npm_v = subprocess.check_output(
         [npm_cmd(), "-v"], text=True, stderr=subprocess.STDOUT
     ).strip()
-    print(f"  Python launcher: OK")
-    print(f"  Node: {node_v}")
-    print(f"  npm:  {npm_v}")
-    print(f"  Docker: OK")
+    print(f"  Python: {py_v} ({host_py})")
+    print(f"  Node:   {node_v}")
+    print(f"  npm:    {npm_v}")
+    print("  Docker: OK")
 
     # Docker daemon reachable?
     probe = subprocess.run(
