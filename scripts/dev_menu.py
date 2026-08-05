@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -93,6 +94,51 @@ def open_new_terminal(title: str, command: str, cwd: Path) -> None:
     print(f"  (no GUI terminal found — running in background, log: logs/{safe}.log)")
 
 
+def lan_ipv4_addresses() -> list[str]:
+    """Best-effort private LAN IPv4 addresses for this machine."""
+    found: list[str] = []
+
+    def add(ip: str) -> None:
+        if not ip or ip.startswith("127."):
+            return
+        if ip.startswith(("10.", "192.168.")) or (
+            ip.startswith("172.")
+            and 16 <= int(ip.split(".")[1]) <= 31
+        ):
+            if ip not in found:
+                found.append(ip)
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            add(s.getsockname()[0])
+    except OSError:
+        pass
+
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
+            add(info[4][0])
+    except OSError:
+        pass
+
+    return found
+
+
+def print_lan_urls(*, app_port: int = 3000, api_port: int = 8000) -> None:
+    ips = lan_ipv4_addresses()
+    print("\nLocal network (same Wi‑Fi / LAN):")
+    if not ips:
+        print("  (could not detect LAN IP — check `ipconfig` / `ip a`)")
+        print(f"  App:  http://<your-pc-ip>:{app_port}")
+        print(f"  API:  http://<your-pc-ip>:{api_port}/docs")
+    else:
+        for ip in ips:
+            print(f"  App:  http://{ip}:{app_port}")
+            print(f"  API:  http://{ip}:{api_port}/docs")
+    print("  Allow Windows Firewall for ports 3000 and 8000 if phones cannot connect.")
+
+
 def ensure_backend_venv() -> None:
     if py_exe().exists():
         return
@@ -140,13 +186,18 @@ def action_backend() -> None:
         cmd = ".venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
     open_new_terminal("RMS Backend", cmd, BACKEND)
     print("Backend → http://127.0.0.1:8000  (docs: /docs)")
+    print("  Listening on 0.0.0.0 — reachable on your local network.")
+    print_lan_urls()
 
 
 def action_frontend() -> None:
     ensure_frontend_deps()
+    # package.json "dev" already binds 0.0.0.0 for LAN tablets/phones
     cmd = "npm.cmd run dev" if IS_WIN else "npm run dev"
     open_new_terminal("RMS Frontend", cmd, FRONTEND)
     print("Frontend → http://127.0.0.1:3000")
+    print("  Listening on 0.0.0.0 — open the LAN URL below on phones/tablets.")
+    print_lan_urls()
 
 
 def action_setup() -> None:
@@ -154,7 +205,7 @@ def action_setup() -> None:
     ensure_backend_venv()
     action_migrate_seed()
     ensure_frontend_deps()
-    print("\nSetup complete. Use menu option 5 to start API + UI.")
+    print("\nSetup complete. Use menu option 5 to start API + UI (LAN shared).")
 
 
 def action_start_all() -> None:
@@ -166,11 +217,12 @@ def action_start_all() -> None:
     time.sleep(1)
     action_frontend()
     print(
-        "\nAll services launching.\n"
-        "  App:  http://127.0.0.1:3000\n"
-        "  API:  http://127.0.0.1:8000/docs\n"
+        "\nAll services launching (shared on local network).\n"
+        "  This PC:  http://127.0.0.1:3000\n"
+        "  API docs: http://127.0.0.1:8000/docs\n"
         "  Login: admin / admin123  or  cashier / cashier123"
     )
+    print_lan_urls()
 
 
 def action_status() -> None:
@@ -193,6 +245,7 @@ MENU = """
 ║  3) Stop Postgres                        ║
 ║  4) Migrate + seed database              ║
 ║  5) Start ALL (Postgres + API + UI)      ║
+║     — also shared on local Wi‑Fi / LAN   ║
 ║  6) Start backend only (port 8000)       ║
 ║  7) Start frontend only (port 3000)      ║
 ║  8) Status check                         ║
