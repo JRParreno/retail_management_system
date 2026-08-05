@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Scanner } from "@yudiel/react-qr-scanner";
+import { Scanner, type IDetectedBarcode } from "@yudiel/react-qr-scanner";
 import { Camera, Keyboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -20,24 +20,92 @@ type Props = {
   onScan: (code: string) => void;
 };
 
+/** Product SKUs / RMS codes — not QR-only. */
+const BARCODE_FORMATS = [
+  "code_128",
+  "code_39",
+  "code_93",
+  "ean_13",
+  "ean_8",
+  "upc_a",
+  "upc_e",
+  "itf",
+  "codabar",
+  "qr_code",
+] as const;
+
+function isSecureCameraContext() {
+  if (typeof window === "undefined") return false;
+  return window.isSecureContext;
+}
+
 export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
   const [manual, setManual] = useState("");
   const [mode, setMode] = useState<"camera" | "manual">("camera");
   const [error, setError] = useState<string | null>(null);
+  const secure = isSecureCameraContext();
 
   useEffect(() => {
     if (!open) {
       setManual("");
       setError(null);
       setMode("camera");
+      return;
     }
-  }, [open]);
+    // Camera APIs are blocked on http://LAN-IP — fall back to manual / BT gun.
+    if (!secure) {
+      setMode("manual");
+      setError(
+        "Camera needs HTTPS. Open the https:// LAN link from the launcher, or use Manual / a Bluetooth barcode gun.",
+      );
+    }
+  }, [open, secure]);
 
   function submitCode(code: string) {
     const trimmed = code.trim();
     if (!trimmed) return;
     onScan(trimmed);
     onOpenChange(false);
+  }
+
+  function handleCameraScan(results: IDetectedBarcode[]) {
+    const text = results[0]?.rawValue?.trim();
+    if (text) submitCode(text);
+  }
+
+  function handleCameraError(err: unknown) {
+    const kind =
+      err && typeof err === "object" && "kind" in err
+        ? String((err as { kind: string }).kind)
+        : "";
+    const message =
+      err && typeof err === "object" && "message" in err
+        ? String((err as { message: string }).message)
+        : err instanceof Error
+          ? err.message
+          : typeof err === "string"
+            ? err
+            : "Camera unavailable";
+
+    if (kind === "insecure-context" || /secure|insecure/i.test(message)) {
+      setError(
+        "Camera blocked: use the https:// address (not http://) on this tablet, or Manual entry.",
+      );
+      setMode("manual");
+      return;
+    }
+    if (kind === "permission-denied" || /permission|notallowed/i.test(message)) {
+      setError(
+        "Camera permission denied — allow camera for this site, or use Manual.",
+      );
+      return;
+    }
+    if (kind === "no-camera") {
+      setError("No camera found — use Manual / Bluetooth barcode gun.");
+      setMode("manual");
+      return;
+    }
+    setError(`${message} — try Manual entry or a Bluetooth barcode gun.`);
   }
 
   return (
@@ -52,7 +120,11 @@ export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
             type="button"
             variant={mode === "camera" ? "default" : "outline"}
             className="min-h-11 gap-2"
-            onClick={() => setMode("camera")}
+            disabled={!secure}
+            onClick={() => {
+              setError(null);
+              setMode("camera");
+            }}
           >
             <Camera className="size-4" /> Camera
           </Button>
@@ -62,47 +134,61 @@ export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
             className="min-h-11 gap-2"
             onClick={() => setMode("manual")}
           >
-            <Keyboard className="size-4" /> Manual
+            <Keyboard className="size-4" /> Manual / gun
           </Button>
         </div>
 
-        {mode === "camera" ? (
+        {mode === "camera" && secure ? (
           <div className="space-y-2">
             <div className="overflow-hidden rounded-xl border bg-black">
               <Scanner
-                constraints={{ facingMode: "environment" }}
-                onScan={(results) => {
-                  const text = results[0]?.rawValue;
-                  if (text) submitCode(text);
+                formats={[...BARCODE_FORMATS]}
+                constraints={{
+                  facingMode: { ideal: "environment" },
                 }}
-                onError={() =>
-                  setError("Camera unavailable — use Manual entry or a barcode gun.")
-                }
-                styles={{ container: { width: "100%" } }}
+                components={{ torch: true, finder: true }}
+                scanDelay={400}
+                onScan={handleCameraScan}
+                onError={handleCameraError}
+                styles={{
+                  container: { width: "100%", minHeight: 240 },
+                }}
               />
             </div>
             {error ? (
               <p className="text-sm text-destructive">{error}</p>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Point the tablet camera at the barcode / QR
+                Point the rear camera at the barcode. Hold steady until it beeps /
+                closes.
               </p>
             )}
           </div>
         ) : (
           <div className="space-y-3">
+            {error ? (
+              <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+                {error}
+              </p>
+            ) : null}
             <div className="space-y-2">
               <Label htmlFor="barcode-manual">Barcode / SKU</Label>
               <Input
                 id="barcode-manual"
-                className="min-h-11"
+                data-barcode-capture="true"
+                className="min-h-11 font-mono"
                 autoFocus
+                autoComplete="off"
+                inputMode="text"
                 value={manual}
                 onChange={(e) => setManual(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") submitCode(manual);
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    submitCode(manual);
+                  }
                 }}
-                placeholder="Type or scan with gun then Enter"
+                placeholder="Scan with gun or type, then Enter"
               />
             </div>
             <Button
@@ -112,6 +198,9 @@ export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
             >
               Use barcode
             </Button>
+            <p className="text-xs text-muted-foreground">
+              Bluetooth / USB barcode guns work here — tap the field, then scan.
+            </p>
           </div>
         )}
       </DialogContent>

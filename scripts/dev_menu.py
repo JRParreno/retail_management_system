@@ -95,16 +95,14 @@ def open_new_terminal(title: str, command: str, cwd: Path) -> None:
 
 
 def lan_ipv4_addresses() -> list[str]:
-    """Best-effort private LAN IPv4 addresses for this machine."""
+    """Best-effort Wi‑Fi / Ethernet LAN IPv4 addresses (skip Docker/WSL virt)."""
     found: list[str] = []
 
     def add(ip: str) -> None:
         if not ip or ip.startswith("127."):
             return
-        if ip.startswith(("10.", "192.168.")) or (
-            ip.startswith("172.")
-            and 16 <= int(ip.split(".")[1]) <= 31
-        ):
+        # Prefer real LAN; Docker Desktop / WSL often use 172.16–31.x
+        if ip.startswith("192.168.") or ip.startswith("10."):
             if ip not in found:
                 found.append(ip)
 
@@ -127,15 +125,16 @@ def lan_ipv4_addresses() -> list[str]:
 
 def print_lan_urls(*, app_port: int = 3000, api_port: int = 8000) -> None:
     ips = lan_ipv4_addresses()
-    print("\nLocal network (same Wi‑Fi / LAN):")
+    print("\nLocal network (same Wi‑Fi / LAN) — use HTTPS for tablet camera scan:")
     if not ips:
         print("  (could not detect LAN IP — check `ipconfig` / `ip a`)")
-        print(f"  App:  http://<your-pc-ip>:{app_port}")
+        print(f"  App:  https://<your-pc-ip>:{app_port}")
         print(f"  API:  http://<your-pc-ip>:{api_port}/docs")
     else:
         for ip in ips:
-            print(f"  App:  http://{ip}:{app_port}")
+            print(f"  App:  https://{ip}:{app_port}")
             print(f"  API:  http://{ip}:{api_port}/docs")
+    print("  First visit: accept the self-signed certificate warning on the tablet.")
     print("  Allow Windows Firewall for ports 3000 and 8000 if phones cannot connect.")
 
 

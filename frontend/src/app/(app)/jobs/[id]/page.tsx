@@ -314,7 +314,9 @@ export default function JobDetailPage() {
               <Label>Barcode / SKU</Label>
               <div className="flex gap-2">
                 <Input
-                  className="min-h-11"
+                  className="min-h-11 font-mono"
+                  data-barcode-capture="true"
+                  autoComplete="off"
                   placeholder="Type barcode then Enter"
                   value={barcodeQuery}
                   onChange={(e) => setBarcodeQuery(e.target.value)}

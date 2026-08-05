@@ -48,7 +48,7 @@ python scripts/dev_menu.py 5
 
 - App (this PC): http://127.0.0.1:3000  
 - API docs: http://127.0.0.1:8000/docs  
-- **LAN / Wi‑Fi:** option 5 binds UI + API on `0.0.0.0` and prints your PC’s LAN URL (e.g. `http://192.168.x.x:3000`) for phones/tablets. Allow Windows Firewall on ports 3000 and 8000 if needed.
+- **LAN / Wi‑Fi:** option 5 binds UI + API on `0.0.0.0`, serves the UI over **HTTPS** (needed for tablet camera barcode), and prints your PC’s LAN URL (e.g. `https://192.168.x.x:3000`). On first visit, accept the certificate warning. Allow Windows Firewall on ports 3000 and 8000 if needed.
 
 ### Demo logins
 
