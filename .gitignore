@@ -51,6 +51,8 @@ yarn-error.log*
 
 # Uploads / runtime data
 backend/uploads/
+logs/
+*.pid
 *.pem
 
 # Docker volumes / local DB dumps

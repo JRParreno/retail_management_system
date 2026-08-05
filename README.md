@@ -63,7 +63,47 @@ cd backend && python -m app.scripts.seed_admin
 # or from launcher menu option 9
 ```
 
-## Manual quick start (optional)
+## Production deploy (no demo data)
+
+From the project root:
+
+**Windows**
+```powershell
+.\run_prod.ps1
+```
+or
+```bat
+run_prod.cmd
+```
+
+**Ubuntu / Linux**
+```bash
+chmod +x run_prod.sh   # once
+./run_prod.sh
+```
+
+**Either OS**
+```bash
+python scripts/prod_deploy.py
+# restart only (reuse existing build):
+python scripts/prod_deploy.py --skip-build
+# stop servers:
+python scripts/prod_deploy.py --stop-only
+```
+
+What it does:
+1. Checks Docker, Node, npm, Python  
+2. Starts Postgres  
+3. Installs backend deps, sets `DEBUG=false`  
+4. Runs migrations  
+5. Seeds **Main branch + `admin` / `admin123` only** (no demo products, mechanics, or cashier)  
+6. Builds the Next.js app  
+7. Stops old processes on ports 3000/8000 and starts production servers  
+8. Prints local + LAN URLs  
+
+Login after deploy: `admin` / `admin123`
+
+---
 
 ```bash
 docker compose up -d
