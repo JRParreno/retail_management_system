@@ -50,13 +50,35 @@ APP_PORT = 3000
 def py_exe() -> Path:
     if IS_WIN:
         return BACKEND / ".venv" / "Scripts" / "python.exe"
-    return BACKEND / ".venv" / "bin" / "python"
+    unix = BACKEND / ".venv" / "bin" / "python"
+    if unix.exists():
+        return unix
+    return BACKEND / ".venv" / "bin" / "python3"
 
 
-def pip_exe() -> Path:
-    if IS_WIN:
-        return BACKEND / ".venv" / "Scripts" / "pip.exe"
-    return BACKEND / ".venv" / "bin" / "pip"
+def ensure_backend_venv() -> None:
+    if not py_exe().exists():
+        print("Creating backend virtualenv…")
+        venv.create(BACKEND / ".venv", with_pip=True)
+
+    python = py_exe()
+    if not python.exists():
+        raise SystemExit(f"Virtualenv python missing at {python}")
+
+    # Prefer `python -m pip` — the standalone pip script is often missing on Linux.
+    ensure = subprocess.run(
+        [str(python), "-m", "pip", "--version"],
+        cwd=str(BACKEND),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if ensure.returncode != 0:
+        print("Bootstrapping pip into virtualenv…")
+        run([str(python), "-m", "ensurepip", "--upgrade"], cwd=BACKEND, check=False)
+        run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=BACKEND)
+
+    run([str(python), "-m", "pip", "install", "-r", "requirements.txt"], cwd=BACKEND)
 
 
 def npm_cmd() -> str:
@@ -148,13 +170,6 @@ def check_requirements() -> None:
             "Start Docker Desktop / dockerd, then retry."
         )
     print("  Docker daemon: OK")
-
-
-def ensure_backend_venv() -> None:
-    if not py_exe().exists():
-        print("Creating backend virtualenv…")
-        venv.create(BACKEND / ".venv", with_pip=True)
-    run([str(pip_exe()), "install", "-r", "requirements.txt"], cwd=BACKEND)
 
 
 def ensure_backend_env() -> None:

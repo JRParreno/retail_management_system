@@ -143,7 +143,7 @@ def ensure_backend_venv() -> None:
         return
     print("Creating backend virtualenv…")
     venv.create(BACKEND / ".venv", with_pip=True)
-    run([str(pip_exe()), "install", "-r", "requirements.txt"], cwd=BACKEND)
+    run([str(py_exe()), "-m", "pip", "install", "-r", "requirements.txt"], cwd=BACKEND)
 
 
 def ensure_frontend_deps() -> None:
