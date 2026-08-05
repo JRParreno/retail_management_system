@@ -103,6 +103,21 @@ What it does:
 
 Login after deploy: `admin` / `admin123`
 
+### Cloudflare Tunnel (public HTTPS)
+
+No router port-forward needed. See `cloudflare/README.md`.
+
+```powershell
+# Temporary public URL (testing)
+.\run_prod.ps1 --with-tunnel quick
+
+# Permanent hostname (after cloudflare/config.yml is set up)
+.\run_prod.ps1 --with-tunnel named
+
+# Tunnel only (app already running)
+.\run_prod.ps1 --tunnel-only quick
+```
+
 ---
 
 ```bash

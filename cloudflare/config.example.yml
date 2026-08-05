@@ -1,0 +1,23 @@
+# Cloudflare Tunnel — named (permanent) config for MotoShop RMS
+#
+# Setup (once):
+#   1. Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/
+#   2. cloudflared tunnel login
+#   3. cloudflared tunnel create rms
+#   4. Copy this file to config.yml and fill tunnel id + credentials path
+#   5. cloudflared tunnel route dns rms app.yourdomain.com
+#   6. ./run_prod.ps1 --with-tunnel named
+#      or: cloudflared tunnel --config cloudflare/config.yml run
+#
+# Quick test (no domain / temporary URL):
+#   ./run_prod.ps1 --with-tunnel quick
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: REPLACE_WITH_CREDENTIALS_JSON_PATH
+
+ingress:
+  # Public HTTPS hostname → local Next.js (proxies /api to FastAPI)
+  - hostname: app.yourdomain.com
+    service: http://127.0.0.1:3000
+  # Required catch-all
+  - service: http_status:404

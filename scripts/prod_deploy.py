@@ -13,6 +13,8 @@ Production deploy / restart for MotoShop RMS.
 Usage (from repo root):
   python scripts/prod_deploy.py
   python scripts/prod_deploy.py --skip-build
+  python scripts/prod_deploy.py --with-tunnel quick
+  python scripts/prod_deploy.py --with-tunnel named
   ./run_prod.sh
   .\\run_prod.ps1
 """
@@ -35,13 +37,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
+CLOUDFLARE = ROOT / "cloudflare"
 LOGS = ROOT / "logs"
 IS_WIN = os.name == "nt"
 
 BACKEND_PID = LOGS / "prod_backend.pid"
 FRONTEND_PID = LOGS / "prod_frontend.pid"
+TUNNEL_PID = LOGS / "prod_tunnel.pid"
 BACKEND_LOG = LOGS / "prod_backend.log"
 FRONTEND_LOG = LOGS / "prod_frontend.log"
+TUNNEL_LOG = LOGS / "prod_tunnel.log"
 
 API_PORT = 8000
 APP_PORT = 3000
@@ -348,7 +353,7 @@ def read_pid_file(path: Path) -> int | None:
 
 def stop_production_servers() -> None:
     print("\n=== Stopping existing production servers ===")
-    for path in (BACKEND_PID, FRONTEND_PID):
+    for path in (BACKEND_PID, FRONTEND_PID, TUNNEL_PID):
         pid = read_pid_file(path)
         if pid:
             print(f"  Stopping PID {pid} from {path.name}")
@@ -360,6 +365,83 @@ def stop_production_servers() -> None:
             print(f"  Freeing port {port} (PID {pid})")
             stop_pid(pid)
     time.sleep(1)
+
+
+def cloudflared_exe() -> str:
+    path = shutil.which("cloudflared") or shutil.which("cloudflared.exe")
+    if not path:
+        raise SystemExit(
+            "cloudflared not found.\n"
+            "  Windows: winget install Cloudflare.cloudflared\n"
+            "  Linux:   see cloudflare/README.md\n"
+            "Then re-run with --with-tunnel quick|named"
+        )
+    return path
+
+
+def start_cloudflare_tunnel(mode: str) -> None:
+    """mode: 'quick' (trycloudflare.com) or 'named' (cloudflare/config.yml)."""
+    print(f"\n=== Starting Cloudflare Tunnel ({mode}) ===")
+    cf = cloudflared_exe()
+    if mode == "quick":
+        cmd = [
+            cf,
+            "tunnel",
+            "--url",
+            f"http://127.0.0.1:{APP_PORT}",
+            "--no-autoupdate",
+        ]
+    elif mode == "named":
+        config = CLOUDFLARE / "config.yml"
+        if not config.exists():
+            example = CLOUDFLARE / "config.example.yml"
+            raise SystemExit(
+                f"Missing {config}.\n"
+                f"Copy {example} → config.yml, fill tunnel UUID + credentials, "
+                "then route DNS (see cloudflare/README.md)."
+            )
+        cmd = [
+            cf,
+            "tunnel",
+            "--config",
+            str(config),
+            "--no-autoupdate",
+            "run",
+        ]
+    else:
+        raise SystemExit(f"Unknown tunnel mode: {mode}")
+
+    if TUNNEL_LOG.exists():
+        # Truncate so we can find the fresh quick-tunnel URL
+        TUNNEL_LOG.write_text("", encoding="utf-8")
+
+    start_detached(cmd, cwd=ROOT, log_file=TUNNEL_LOG, pid_file=TUNNEL_PID)
+    if mode == "quick":
+        url = wait_for_quick_tunnel_url(timeout_s=45)
+        if url:
+            print(f"  Public URL: {url}")
+            (LOGS / "prod_tunnel_url.txt").write_text(url + "\n", encoding="utf-8")
+        else:
+            print(
+                "  Quick tunnel started — check logs/prod_tunnel.log for the "
+                "https://*.trycloudflare.com URL"
+            )
+    else:
+        print(f"  Named tunnel using {CLOUDFLARE / 'config.yml'}")
+        print("  Open your configured hostname (HTTPS via Cloudflare).")
+
+
+def wait_for_quick_tunnel_url(*, timeout_s: int = 45) -> str | None:
+    pattern = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I)
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if TUNNEL_LOG.exists():
+            text = TUNNEL_LOG.read_text(encoding="utf-8", errors="ignore")
+            match = pattern.search(text)
+            if match:
+                return match.group(0)
+        time.sleep(1)
+    return None
 
 
 def start_detached(cmd: list[str], *, cwd: Path, log_file: Path, pid_file: Path) -> int:
@@ -460,19 +542,32 @@ def lan_ipv4_addresses() -> list[str]:
     return found
 
 
-def print_summary() -> None:
+def print_summary(*, tunnel_mode: str | None = None) -> None:
     print("\n=== Production deploy complete ===")
     print(f"  This PC:  http://127.0.0.1:{APP_PORT}")
     print(f"  API:      http://127.0.0.1:{API_PORT}/docs")
     for ip in lan_ipv4_addresses():
         print(f"  LAN app:  http://{ip}:{APP_PORT}")
         print(f"  LAN API:  http://{ip}:{API_PORT}/docs")
+    if tunnel_mode == "quick":
+        url_file = LOGS / "prod_tunnel_url.txt"
+        if url_file.exists():
+            print(f"  Tunnel:   {url_file.read_text(encoding='utf-8').strip()}")
+        else:
+            print("  Tunnel:   see logs/prod_tunnel.log for trycloudflare.com URL")
+    elif tunnel_mode == "named":
+        print("  Tunnel:   named (cloudflare/config.yml hostname)")
     print("  Login:    admin / admin123")
     print("  Note:     No demo products/mechanics/cashier were seeded.")
     print(f"  Logs:     {BACKEND_LOG}")
     print(f"           {FRONTEND_LOG}")
-    print("  Tablet camera scan needs HTTPS (use a reverse proxy in real prod),")
-    print("  or open Manual / Bluetooth gun on HTTP for now.")
+    if tunnel_mode:
+        print(f"           {TUNNEL_LOG}")
+        print("  Cloudflare Tunnel gives public HTTPS (good for tablet camera).")
+        print("  Change the admin password before sharing the public URL widely.")
+    else:
+        print("  Tablet camera scan needs HTTPS — use --with-tunnel quick|named,")
+        print("  or open Manual / Bluetooth gun on HTTP for now.")
 
 
 def main() -> None:
@@ -490,7 +585,23 @@ def main() -> None:
     parser.add_argument(
         "--stop-only",
         action="store_true",
-        help="Only stop production servers",
+        help="Only stop production servers (and tunnel)",
+    )
+    parser.add_argument(
+        "--with-tunnel",
+        choices=("quick", "named"),
+        default=None,
+        help=(
+            "Start Cloudflare Tunnel after the app is up: "
+            "'quick' = temporary trycloudflare.com URL; "
+            "'named' = cloudflare/config.yml permanent hostname"
+        ),
+    )
+    parser.add_argument(
+        "--tunnel-only",
+        choices=("quick", "named"),
+        default=None,
+        help="Only (re)start the Cloudflare Tunnel; app must already be running",
     )
     args = parser.parse_args()
 
@@ -500,6 +611,21 @@ def main() -> None:
     if args.stop_only:
         stop_production_servers()
         print("Stopped.")
+        return
+
+    if args.tunnel_only:
+        # Stop previous tunnel only, keep app
+        pid = read_pid_file(TUNNEL_PID)
+        if pid:
+            stop_pid(pid)
+            TUNNEL_PID.unlink(missing_ok=True)
+        if not wait_http(f"http://127.0.0.1:{APP_PORT}", timeout_s=5):
+            raise SystemExit(
+                f"App not reachable on http://127.0.0.1:{APP_PORT}. "
+                "Start production first, then use --tunnel-only."
+            )
+        start_cloudflare_tunnel(args.tunnel_only)
+        print_summary(tunnel_mode=args.tunnel_only)
         return
 
     check_requirements()
@@ -524,7 +650,15 @@ def main() -> None:
     print(f"  API health: {'OK' if api_ok else 'NOT READY (check logs)'}")
     print(f"  App:        {'OK' if app_ok else 'NOT READY (check logs)'}")
 
-    print_summary()
+    tunnel_mode = args.with_tunnel
+    if tunnel_mode:
+        if not app_ok:
+            print("  Skipping tunnel — app is not ready.")
+            tunnel_mode = None
+        else:
+            start_cloudflare_tunnel(tunnel_mode)
+
+    print_summary(tunnel_mode=tunnel_mode)
 
 
 if __name__ == "__main__":
