@@ -382,9 +382,78 @@ def confirm(msg: str, default: bool = True) -> bool:
     return ans in ("y", "yes")
 
 
+def resolve_node_for_user(user: str) -> Path | None:
+    probes = [
+        ["sudo", "-u", user, "-H", "bash", "-lc", "command -v node"],
+        ["bash", "-lc", "command -v node"],
+    ]
+    for cmd in probes:
+        r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        lines = (r.stdout or "").strip().splitlines()
+        if lines:
+            p = Path(lines[-1].strip())
+            if p.is_file():
+                return p
+    for candidate in (Path("/usr/bin/node"), Path("/usr/local/bin/node")):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def rewrite_systemd_unit(path: Path, *, user: str, node: Path | None = None) -> None:
+    if not path.exists():
+        print(f"  missing {path}")
+        return
+    text = path.read_text(encoding="utf-8")
+    lines: list[str] = []
+    repo = str(ROOT)
+    node_bin = str(node.parent) if node else ""
+    next_bin = f"{repo}/frontend/node_modules/next/dist/bin/next"
+    saw_path_env = False
+    for line in text.splitlines():
+        if line.startswith("User="):
+            lines.append(f"User={user}")
+        elif line.startswith("Group="):
+            lines.append(f"Group={user}")
+        elif line.startswith("Environment=PATH=") and node:
+            lines.append(
+                f"Environment=PATH={node_bin}:{repo}/frontend/node_modules/.bin:"
+                "/usr/local/bin:/usr/bin:/bin"
+            )
+            saw_path_env = True
+        elif line.startswith("ExecStart=") and path.name == "rms-web.service" and node:
+            lines.append(
+                f"ExecStart={node} {next_bin} start --hostname 127.0.0.1 --port 3000"
+            )
+        elif "npm" in line and line.startswith("ExecStart=") and node:
+            lines.append(
+                f"ExecStart={node} {next_bin} start --hostname 127.0.0.1 --port 3000"
+            )
+        else:
+            lines.append(line)
+
+    if path.name == "rms-web.service" and node and not saw_path_env:
+        # Insert PATH after WorkingDirectory / Environment block
+        out: list[str] = []
+        inserted = False
+        for line in lines:
+            out.append(line)
+            if not inserted and line.startswith("Environment=BACKEND_URL="):
+                out.append(
+                    f"Environment=PATH={node_bin}:{repo}/frontend/node_modules/.bin:"
+                    "/usr/local/bin:/usr/bin:/bin"
+                )
+                inserted = True
+        lines = out
+
+    content = "\n".join(lines) + "\n"
+    subprocess.run(syscmd("tee", str(path)), input=content, text=True, check=False)
+    print(f"  Updated {path} → User={user}" + (f", node={node}" if node else ""))
+
+
 def action_fix_service_user() -> None:
-    """Point rms-api/rms-web at the login user so /home/... paths work."""
-    print("\n=== Fix service user / permissions ===")
+    """Fix User=/Group= and Node ExecStart (nvm / missing /usr/bin/npm)."""
+    print("\n=== Fix service user + Node path ===")
     user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "jrparreno"
     try:
         ans = input(f"Run systemd units as user [{user}]: ").strip()
@@ -393,28 +462,32 @@ def action_fix_service_user() -> None:
     if ans:
         user = ans
 
-    for unit in ("rms-api", "rms-web"):
-        path = Path(f"/etc/systemd/system/{unit}.service")
-        if not path.exists():
-            print(f"  missing {path} — run Nginx setup first")
-            continue
-        text = path.read_text(encoding="utf-8")
-        lines = []
-        for line in text.splitlines():
-            if line.startswith("User="):
-                lines.append(f"User={user}")
-            elif line.startswith("Group="):
-                lines.append(f"Group={user}")
-            else:
-                lines.append(line)
-        content = "\n".join(lines) + "\n"
-        subprocess.run(
-            syscmd("tee", str(path)),
-            input=content,
-            text=True,
-            check=False,
+    node = resolve_node_for_user(user)
+    if not node:
+        print(
+            "ERROR: node not found.\n"
+            "Install Node 20+, e.g.:\n"
+            "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -\n"
+            "  sudo apt-get install -y nodejs\n"
+            "Or ensure nvm is loaded for this user, then re-run option 11."
         )
-        print(f"  Updated {path} → User={user}")
+        return
+    print(f"  Found node: {node}")
+
+    next_bin = ROOT / "frontend" / "node_modules" / "next" / "dist" / "bin" / "next"
+    if not next_bin.exists():
+        print(
+            f"ERROR: missing {next_bin}\n"
+            "Build the frontend first (menu option 5 Deploy)."
+        )
+        return
+
+    for unit in ("rms-api", "rms-web"):
+        rewrite_systemd_unit(
+            Path(f"/etc/systemd/system/{unit}.service"),
+            user=user,
+            node=node if unit == "rms-web" else None,
+        )
 
     run(syscmd("systemctl", "daemon-reload"))
     run(syscmd("systemctl", "reset-failed", "rms-api", "rms-web"), check=False)
@@ -438,7 +511,7 @@ def menu_text() -> str:
 ║  8  Reload Nginx                         ║
 ║  9  Logs                                 ║
 ║ 10  Re-run Nginx setup (no domain)       ║
-║ 11  Fix service user (CHDIR / perms)     ║
+║ 11  Fix service user + Node path         ║
 ║  0  Exit                                 ║
 ╚══════════════════════════════════════════╝
 """

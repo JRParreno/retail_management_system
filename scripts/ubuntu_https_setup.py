@@ -82,7 +82,18 @@ def render(template_name: str, mapping: dict[str, str]) -> str:
     text = path.read_text(encoding="utf-8")
     for key, value in mapping.items():
         text = text.replace(f"__{key}__", value)
-    leftover = [tok for tok in ("__SSL_CERT__", "__SSL_KEY__", "__REPO_ROOT__", "__SERVICE_USER__") if tok in text]
+    leftover = [
+        tok
+        for tok in (
+            "__SSL_CERT__",
+            "__SSL_KEY__",
+            "__REPO_ROOT__",
+            "__SERVICE_USER__",
+            "__NODE__",
+            "__NODE_BIN__",
+        )
+        if tok in text
+    ]
     if leftover:
         die(f"Unreplaced placeholders in {template_name}: {leftover}")
     return text
@@ -218,8 +229,53 @@ def install_nginx_site(content: str, name: str = "rms") -> None:
     run(["systemctl", "reload", "nginx"])
 
 
+def resolve_node(user: str) -> Path:
+    """Find node for the service user (supports nvm / fnm / apt / nodesource)."""
+    probes = [
+        ["sudo", "-u", user, "-H", "bash", "-lc", "command -v node"],
+        ["bash", "-lc", "command -v node"],
+    ]
+    for cmd in probes:
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        except Exception:
+            continue
+        path = (r.stdout or "").strip().splitlines()
+        if path:
+            p = Path(path[-1].strip())
+            if p.is_file():
+                return p
+
+    for candidate in (
+        Path("/usr/bin/node"),
+        Path("/usr/local/bin/node"),
+    ):
+        if candidate.is_file():
+            return candidate
+
+    die(
+        f"Node.js not found for user '{user}'.\n"
+        "Install Node 20+ (nodesource or nvm), then re-run.\n"
+        "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -\n"
+        "  sudo apt-get install -y nodejs"
+    )
+
+
 def install_systemd_units(repo: Path, user: str) -> None:
-    mapping = {"REPO_ROOT": str(repo), "SERVICE_USER": user}
+    node = resolve_node(user)
+    next_bin = repo / "frontend" / "node_modules" / "next" / "dist" / "bin" / "next"
+    if not next_bin.exists():
+        die(
+            f"Next.js binary missing: {next_bin}\n"
+            "Run a frontend build first (npm ci && npm run build), or omit --skip-build."
+        )
+    mapping = {
+        "REPO_ROOT": str(repo),
+        "SERVICE_USER": user,
+        "NODE": str(node),
+        "NODE_BIN": str(node.parent),
+    }
+    info(f"Using node: {node}")
     write_file(
         Path("/etc/systemd/system/rms-api.service"),
         render("rms-api.service.template", mapping),
