@@ -155,7 +155,9 @@ def print_urls() -> None:
         print(f"  LAN:       {scheme}://{ip}")
     if public_ip:
         print(f"  Public IP: {public_ip}")
-        print(f"  Public:    {scheme}://{public_ip}  (only if router forwards 80/443)")
+        print(f"  Public:    {scheme}://{public_ip}")
+        print("             ↑ works from outside only if router forwards TCP 80/443")
+        print("               to this PC's LAN IP (see docs/production-https-ubuntu.md)")
     else:
         print("  Public IP: (could not detect — try: curl -4 ifconfig.me)")
     print("  API docs:  /docs  (via Nginx)")
