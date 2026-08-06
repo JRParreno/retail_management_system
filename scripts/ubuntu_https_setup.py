@@ -462,8 +462,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--service-user",
-        default="rms",
-        help="Linux user for systemd app units (default: rms)",
+        default=None,
+        help="Linux user for systemd app units (default: $SUDO_USER, else rms)",
     )
     parser.add_argument(
         "--skip-build",
@@ -497,10 +497,24 @@ def main() -> None:
     if not confirm("Continue?", True):
         die("Aborted.")
 
+    service_user = args.service_user
+    if not service_user:
+        service_user = os.environ.get("SUDO_USER") or "rms"
+        # Repo under /home/<user> → must run as that user (rms cannot CHDIR)
+        if str(ROOT).startswith("/home/") and service_user == "rms":
+            parts = Path(str(ROOT)).parts
+            if len(parts) >= 3 and parts[1] == "home":
+                service_user = parts[2]
+                info(
+                    f"Repo is under /home/{service_user} — "
+                    f"using systemd User={service_user} (avoids CHDIR permission errors)"
+                )
+    info(f"Service user: {service_user}")
+
     apt_install(["curl", "ca-certificates", "gnupg", "ufw", "openssl"])
-    ensure_service_user(args.service_user, ROOT)
-    prepare_app(ROOT, args.service_user, skip_build=args.skip_build)
-    install_systemd_units(ROOT, args.service_user)
+    ensure_service_user(service_user, ROOT)
+    prepare_app(ROOT, service_user, skip_build=args.skip_build)
+    install_systemd_units(ROOT, service_user)
     start_app_services()
     setup_nginx(self_signed=args.self_signed)
     verify(self_signed=args.self_signed)

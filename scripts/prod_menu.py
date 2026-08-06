@@ -108,13 +108,58 @@ def https_enabled() -> bool:
     return False
 
 
+def fetch_public_ipv4(timeout: float = 5.0) -> str | None:
+    import urllib.request
+
+    for url in (
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://icanhazip.com",
+    ):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as resp:
+                ip = resp.read().decode("utf-8").strip()
+                if ip and all(c.isdigit() or c == "." for c in ip):
+                    return ip
+        except Exception:
+            continue
+    return None
+
+
+def unit_failed(name: str) -> bool:
+    r = subprocess.run(
+        ["systemctl", "is-failed", name],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return (r.stdout or "").strip() == "failed"
+
+
+def recent_chdir_error(name: str) -> bool:
+    r = subprocess.run(
+        ["journalctl", "-u", name, "-n", "20", "--no-pager"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    text = (r.stdout or "") + (r.stderr or "")
+    return "CHDIR" in text or "Changing to the requested working directory failed" in text
+
+
 def print_urls() -> None:
     scheme = "https" if https_enabled() else "http"
-    print(f"  Local:  {scheme}://127.0.0.1")
+    public_ip = fetch_public_ipv4()
+    print(f"  Local:     {scheme}://127.0.0.1")
     for ip in lan_ipv4_addresses():
-        print(f"  LAN:    {scheme}://{ip}")
-    print("  API docs (via Nginx): /docs")
-    print("  Login:  admin / admin123")
+        print(f"  LAN:       {scheme}://{ip}")
+    if public_ip:
+        print(f"  Public IP: {public_ip}")
+        print(f"  Public:    {scheme}://{public_ip}  (only if router forwards 80/443)")
+    else:
+        print("  Public IP: (could not detect — try: curl -4 ifconfig.me)")
+    print("  API docs:  /docs  (via Nginx)")
+    print("  Login:     admin / admin123")
 
 
 def action_status() -> None:
@@ -123,20 +168,25 @@ def action_status() -> None:
         print("This menu targets Ubuntu systemd. On Windows use .\\run_prod.ps1")
         return
 
+    problems: list[str] = []
     for name in UNITS:
         if not unit_exists(name):
             print(f"  {name:10}  not installed")
             continue
-        state = "active" if unit_active(name) else "inactive"
+        if unit_active(name):
+            state = "active"
+        elif unit_failed(name):
+            state = "failed"
+            problems.append(name)
+        else:
+            state = "inactive"
         print(f"  {name:10}  {state}")
-
-    print("\nPorts:")
-    run(["ss", "-tulpn"], check=False)
 
     print("\nURLs:")
     print_urls()
 
     # Quick health
+    print("\nHealth:")
     for label, url in (
         ("API", "http://127.0.0.1:8000/health"),
         ("Web", "http://127.0.0.1:3000"),
@@ -146,9 +196,28 @@ def action_status() -> None:
             import urllib.request
 
             with urllib.request.urlopen(url, timeout=3) as resp:
-                print(f"  Health {label:5}  HTTP {resp.status}  ({url})")
+                print(f"  {label:5}  HTTP {resp.status}  ({url})")
         except Exception as exc:
-            print(f"  Health {label:5}  FAIL ({exc})")
+            print(f"  {label:5}  FAIL ({exc})")
+
+    if problems:
+        print("\n⚠ Failed units:")
+        for name in problems:
+            if recent_chdir_error(name):
+                print(
+                    f"  {name}: Permission denied on WorkingDirectory (CHDIR).\n"
+                    "  Cause: service User=rms cannot enter a path under /home/<you>/.\n"
+                    "  Fix (run once):\n"
+                    f"    sudo sed -i 's/^User=.*/User={os.environ.get('USER', 'jrparreno')}/' "
+                    "/etc/systemd/system/rms-api.service /etc/systemd/system/rms-web.service\n"
+                    f"    sudo sed -i 's/^Group=.*/Group={os.environ.get('USER', 'jrparreno')}/' "
+                    "/etc/systemd/system/rms-api.service /etc/systemd/system/rms-web.service\n"
+                    "    sudo systemctl daemon-reload\n"
+                    "    sudo systemctl restart rms-api rms-web\n"
+                    "  Or use menu option 11 (Fix service user / permissions)."
+                )
+            else:
+                print(f"  {name}: see journalctl -u {name} -n 50 --no-pager")
 
 
 def action_start() -> None:
@@ -313,12 +382,53 @@ def confirm(msg: str, default: bool = True) -> bool:
     return ans in ("y", "yes")
 
 
+def action_fix_service_user() -> None:
+    """Point rms-api/rms-web at the login user so /home/... paths work."""
+    print("\n=== Fix service user / permissions ===")
+    user = os.environ.get("SUDO_USER") or os.environ.get("USER") or "jrparreno"
+    try:
+        ans = input(f"Run systemd units as user [{user}]: ").strip()
+    except EOFError:
+        ans = ""
+    if ans:
+        user = ans
+
+    for unit in ("rms-api", "rms-web"):
+        path = Path(f"/etc/systemd/system/{unit}.service")
+        if not path.exists():
+            print(f"  missing {path} — run Nginx setup first")
+            continue
+        text = path.read_text(encoding="utf-8")
+        lines = []
+        for line in text.splitlines():
+            if line.startswith("User="):
+                lines.append(f"User={user}")
+            elif line.startswith("Group="):
+                lines.append(f"Group={user}")
+            else:
+                lines.append(line)
+        content = "\n".join(lines) + "\n"
+        subprocess.run(
+            syscmd("tee", str(path)),
+            input=content,
+            text=True,
+            check=False,
+        )
+        print(f"  Updated {path} → User={user}")
+
+    run(syscmd("systemctl", "daemon-reload"))
+    run(syscmd("systemctl", "reset-failed", "rms-api", "rms-web"), check=False)
+    run(syscmd("systemctl", "restart", "rms-api", "rms-web"))
+    time.sleep(2)
+    action_status()
+
+
 def menu_text() -> str:
     return """
 ╔══════════════════════════════════════════╗
 ║     MotoShop RMS — Production menu       ║
 ╠══════════════════════════════════════════╣
-║  1  Status                               ║
+║  1  Status (includes public IP)          ║
 ║  2  Start services                       ║
 ║  3  Stop services                        ║
 ║  4  Restart all (API + Web + Nginx)      ║
@@ -328,6 +438,7 @@ def menu_text() -> str:
 ║  8  Reload Nginx                         ║
 ║  9  Logs                                 ║
 ║ 10  Re-run Nginx setup (no domain)       ║
+║ 11  Fix service user (CHDIR / perms)     ║
 ║  0  Exit                                 ║
 ╚══════════════════════════════════════════╝
 """
@@ -344,6 +455,7 @@ ACTIONS = {
     "8": action_reload_nginx,
     "9": action_logs,
     "10": action_setup_nginx,
+    "11": action_fix_service_user,
 }
 
 
