@@ -3,23 +3,17 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC = ["/login"];
 
 /**
- * nextUrl.host is the bind address (127.0.0.1:3000) behind Nginx.
- * Use forwarded Host / Proto so redirects stay on the LAN/public URL.
+ * Use a relative Location so the browser stays on whatever host the user
+ * opened (LAN IP / public IP via Nginx). Absolute redirects from nextUrl
+ * incorrectly become https://localhost:3000 behind a reverse proxy.
  */
-function externalOrigin(req: NextRequest): string {
-  const proto =
-    req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() ||
-    req.nextUrl.protocol.replace(":", "") ||
-    "http";
-  const host =
-    req.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ||
-    req.headers.get("host") ||
-    req.nextUrl.host;
-  return `${proto}://${host}`;
-}
-
-function redirectPath(req: NextRequest, pathname: string) {
-  return NextResponse.redirect(new URL(pathname, externalOrigin(req)));
+function redirectPath(pathname: string) {
+  return new NextResponse(null, {
+    status: 307,
+    headers: {
+      Location: pathname.startsWith("/") ? pathname : `/${pathname}`,
+    },
+  });
 }
 
 export function middleware(req: NextRequest) {
@@ -31,15 +25,15 @@ export function middleware(req: NextRequest) {
   if (isApi) return NextResponse.next();
 
   if (!token && !isPublic && pathname !== "/") {
-    return redirectPath(req, "/login");
+    return redirectPath("/login");
   }
 
   if (token && (pathname === "/login" || pathname === "/")) {
-    return redirectPath(req, "/dashboard");
+    return redirectPath("/dashboard");
   }
 
   if (!token && pathname === "/") {
-    return redirectPath(req, "/login");
+    return redirectPath("/login");
   }
 
   return NextResponse.next();
