@@ -1,0 +1,20 @@
+[Unit]
+Description=MotoShop RMS FastAPI (Uvicorn)
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__SERVICE_USER__
+WorkingDirectory=__REPO_ROOT__/backend
+Environment=PATH=__REPO_ROOT__/backend/.venv/bin:/usr/bin
+EnvironmentFile=-__REPO_ROOT__/backend/.env
+ExecStart=__REPO_ROOT__/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

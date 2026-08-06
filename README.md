@@ -118,6 +118,30 @@ No router port-forward needed. See `cloudflare/README.md`.
 .\run_prod.ps1 --tunnel-only quick
 ```
 
+### Full Ubuntu production edge (Nginx, no domain)
+
+Manual guide: [`docs/production-https-ubuntu.md`](docs/production-https-ubuntu.md)
+
+**One-shot setup** (Ubuntu — Nginx reverse proxy by LAN/public IP, no DNS):
+
+```bash
+chmod +x run_ubuntu_https.sh
+sudo ./run_ubuntu_https.sh --yes
+# HTTPS with self-signed cert (tablet camera; accept browser warning once):
+sudo ./run_ubuntu_https.sh --self-signed --yes
+```
+
+Installs UFW, Nginx, and systemd units `rms-api` / `rms-web`. Open `http://<server-lan-ip>` (or `https://…` with `--self-signed`).
+
+**Day-to-day ops menu** (start / stop / restart / deploy after changes / logs):
+
+```bash
+chmod +x run_prod_menu.sh
+./run_prod_menu.sh
+# or jump to an option, e.g. deploy:
+./run_prod_menu.sh 5
+```
+
 ---
 
 ```bash

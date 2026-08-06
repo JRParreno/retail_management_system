@@ -1,0 +1,22 @@
+[Unit]
+Description=MotoShop RMS Next.js
+After=network.target rms-api.service
+Wants=rms-api.service
+
+[Service]
+Type=simple
+User=__SERVICE_USER__
+Group=__SERVICE_USER__
+WorkingDirectory=__REPO_ROOT__/frontend
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=127.0.0.1
+Environment=BACKEND_URL=http://127.0.0.1:8000
+ExecStart=/usr/bin/npm run start -- --hostname 127.0.0.1 --port 3000
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
