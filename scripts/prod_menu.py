@@ -162,6 +162,26 @@ def print_urls() -> None:
     print("  Login:     admin / admin123")
 
 
+def check_http(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+    """Local health probe. Accepts self-signed TLS (Nginx --self-signed setup)."""
+    import ssl
+    import urllib.error
+    import urllib.request
+
+    ctx = ssl._create_unverified_context()
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return True, f"HTTP {resp.status}"
+    except urllib.error.HTTPError as exc:
+        # Reached the server; 4xx/5xx still means Nginx is up
+        if 400 <= exc.code < 600:
+            return True, f"HTTP {exc.code}"
+        return False, str(exc)
+    except Exception as exc:
+        return False, str(exc)
+
+
 def action_status() -> None:
     print("\n=== Status ===")
     if not IS_LINUX:
@@ -185,20 +205,20 @@ def action_status() -> None:
     print("\nURLs:")
     print_urls()
 
-    # Quick health
+    # Quick health — Nginx HTTP redirects to HTTPS when --self-signed was used
+    scheme = "https" if https_enabled() else "http"
     print("\nHealth:")
-    for label, url in (
+    checks = (
         ("API", "http://127.0.0.1:8000/health"),
         ("Web", "http://127.0.0.1:3000"),
-        ("Nginx", "http://127.0.0.1/health"),
-    ):
-        try:
-            import urllib.request
-
-            with urllib.request.urlopen(url, timeout=3) as resp:
-                print(f"  {label:5}  HTTP {resp.status}  ({url})")
-        except Exception as exc:
-            print(f"  {label:5}  FAIL ({exc})")
+        ("Nginx", f"{scheme}://127.0.0.1/health"),
+    )
+    for label, url in checks:
+        ok, detail = check_http(url)
+        mark = "OK" if ok else "FAIL"
+        print(f"  {label:5}  {mark}  {detail}  ({url})")
+    if https_enabled():
+        print("  (self-signed HTTPS: browsers will warn once — that is expected)")
 
     if problems:
         print("\n⚠ Failed units:")
