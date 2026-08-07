@@ -346,14 +346,24 @@ def stop_production_servers() -> None:
 
 
 def cloudflared_exe() -> str:
-    path = shutil.which("cloudflared")
-    if not path:
-        raise SystemExit(
-            "cloudflared not found.\n"
-            "  See cloudflare/README.md for Linux install steps.\n"
-            "Then re-run with --with-tunnel quick|named"
-        )
-    return path
+    candidates: list[Path] = []
+    which = shutil.which("cloudflared")
+    if which:
+        candidates.append(Path(which))
+    candidates.append(Path.home() / ".local" / "bin" / "cloudflared")
+    candidates.append(Path("/usr/local/bin/cloudflared"))
+    candidates.append(Path("/usr/bin/cloudflared"))
+    for path in candidates:
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    raise SystemExit(
+        "cloudflared not found.\n"
+        "  Install: see cloudflare/README.md\n"
+        "  Or: curl -fsSL -o ~/.local/bin/cloudflared \\\n"
+        "       https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64\n"
+        "     chmod +x ~/.local/bin/cloudflared\n"
+        "Then re-run with --with-tunnel quick|named"
+    )
 
 
 def start_cloudflare_tunnel(mode: str) -> None:

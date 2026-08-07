@@ -3,7 +3,7 @@
 Production ops menu for MotoShop RMS (Ubuntu systemd + Nginx).
 
 After first-time setup (`sudo ./run_ubuntu_https.sh`), use this to:
-  start / stop / restart services, deploy code changes, check status, view logs.
+  start / stop / restart services, deploy code changes, Cloudflare Tunnel, check status, view logs.
 
 Usage:
   ./run_prod_menu.sh
@@ -25,17 +25,32 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 IS_LINUX = sys.platform.startswith("linux")
 
+LOGS = ROOT / "logs"
+TUNNEL_PID = LOGS / "prod_tunnel.pid"
+TUNNEL_LOG = LOGS / "prod_tunnel.log"
+TUNNEL_URL = LOGS / "prod_tunnel_url.txt"
+CLOUDFLARE_DIR = ROOT / "cloudflare"
+
 UNITS = ("rms-api", "rms-web", "nginx")
 
 
-def run(cmd: list[str], *, check: bool = False, capture: bool = False) -> subprocess.CompletedProcess[str]:
+def run(cmd: list[str], *, check: bool = False, capture: bool = False, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     print(f"\n→ {' '.join(cmd)}")
+    merged = os.environ.copy()
+    # Prefer user-local cloudflared (~/.local/bin) when present
+    local_bin = str(Path.home() / ".local" / "bin")
+    path = merged.get("PATH", "")
+    if local_bin not in path.split(":"):
+        merged["PATH"] = f"{local_bin}:{path}" if path else local_bin
+    if env:
+        merged.update(env)
     return subprocess.run(
         cmd,
         cwd=str(ROOT),
         check=check,
         text=True,
         capture_output=capture,
+        env=merged,
     )
 
 
@@ -161,8 +176,212 @@ def print_urls() -> None:
         print("               to this PC's LAN IP (see docs/production-https-ubuntu.md)")
     else:
         print("  Public IP: (could not detect — try: curl -4 ifconfig.me)")
+    tunnel = read_tunnel_url()
+    if tunnel_running() and tunnel:
+        print(f"  Tunnel:    {tunnel}")
+        print("             ↑ Cloudflare HTTPS (works without port forward / on CGNAT)")
+    elif tunnel_running():
+        print("  Tunnel:    running (URL in logs/prod_tunnel.log)")
+    else:
+        print("  Tunnel:    off  (menu option 12)")
     print("  API docs:  /docs  (via Nginx)")
     print("  Login:     admin / admin123")
+
+
+def cloudflared_path() -> Path | None:
+    which = shutil.which("cloudflared")
+    candidates = []
+    if which:
+        candidates.append(Path(which))
+    candidates.extend(
+        [
+            Path.home() / ".local" / "bin" / "cloudflared",
+            Path("/usr/local/bin/cloudflared"),
+            Path("/usr/bin/cloudflared"),
+        ]
+    )
+    for path in candidates:
+        if path.is_file() and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def read_tunnel_pid() -> int | None:
+    if not TUNNEL_PID.exists():
+        return None
+    try:
+        pid = int(TUNNEL_PID.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    return pid if pid_alive(pid) else None
+
+
+def tunnel_running() -> bool:
+    return read_tunnel_pid() is not None
+
+
+def read_tunnel_url() -> str | None:
+    if TUNNEL_URL.exists():
+        try:
+            url = TUNNEL_URL.read_text(encoding="utf-8").strip().splitlines()[0].strip()
+            if url.startswith("https://"):
+                return url
+        except OSError:
+            pass
+    if TUNNEL_LOG.exists():
+        import re
+
+        try:
+            text = TUNNEL_LOG.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            return None
+        matches = re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com", text, re.I)
+        if matches:
+            return matches[-1]
+    return None
+
+
+def ensure_apps_for_tunnel() -> bool:
+    """Start rms-api/rms-web if needed before opening a tunnel."""
+    missing = [n for n in ("rms-api", "rms-web") if unit_exists(n) and not unit_active(n)]
+    if not missing:
+        ok, _ = check_http("http://127.0.0.1:3000")
+        if ok:
+            return True
+        print("  Web not responding on :3000 — start services first (option 2).")
+        return False
+    print(f"  Starting {' + '.join(missing)} (required for tunnel)…")
+    for name in missing:
+        run(syscmd("systemctl", "reset-failed", name), check=False)
+        run(syscmd("systemctl", "start", name))
+    time.sleep(2)
+    ok, detail = check_http("http://127.0.0.1:3000")
+    if not ok:
+        print(f"  Web still down ({detail}). Fix with option 1 / 2, then retry.")
+        return False
+    return True
+
+
+def action_tunnel_start(mode: str) -> None:
+    label = "quick (trycloudflare.com)" if mode == "quick" else "named (config.yml)"
+    print(f"\n=== Cloudflare Tunnel — start {label} ===")
+    if not cloudflared_path():
+        print(
+            "cloudflared not found.\n"
+            "Install once:\n"
+            "  mkdir -p ~/.local/bin\n"
+            "  curl -fsSL -o ~/.local/bin/cloudflared \\\n"
+            "    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64\n"
+            "  chmod +x ~/.local/bin/cloudflared\n"
+            "See also: cloudflare/README.md"
+        )
+        return
+    if mode == "named" and not (CLOUDFLARE_DIR / "config.yml").exists():
+        print(
+            f"Missing {CLOUDFLARE_DIR / 'config.yml'}.\n"
+            f"  cp {CLOUDFLARE_DIR / 'config.example.yml'} {CLOUDFLARE_DIR / 'config.yml'}\n"
+            "  Fill tunnel UUID + credentials, then:\n"
+            "  cloudflared tunnel route dns rms your.hostname\n"
+            "See cloudflare/README.md"
+        )
+        return
+    if not ensure_apps_for_tunnel():
+        return
+    if tunnel_running():
+        url = read_tunnel_url()
+        print(f"  Restarting existing tunnel{f' ({url})' if url else ''}…")
+
+    run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "prod_deploy.py"),
+            "--tunnel-only",
+            mode,
+        ],
+        check=False,
+    )
+    url = read_tunnel_url()
+    if url:
+        print(f"\n  Open: {url}")
+        print("  Local/LAN URLs still work while the tunnel is up.")
+
+
+def action_tunnel_stop() -> None:
+    print("\n=== Cloudflare Tunnel — stop ===")
+    pid = read_tunnel_pid()
+    if not pid:
+        # Clear stale pid/url
+        TUNNEL_PID.unlink(missing_ok=True)
+        print("  Tunnel was not running.")
+        return
+    print(f"  Stopping PID {pid}…")
+    try:
+        os.kill(pid, 15)
+    except OSError as exc:
+        print(f"  kill failed: {exc}")
+    time.sleep(1)
+    if pid_alive(pid):
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+    TUNNEL_PID.unlink(missing_ok=True)
+    print("  Tunnel stopped. Local/LAN access unchanged.")
+
+
+def action_tunnel_status() -> None:
+    print("\n=== Cloudflare Tunnel — status ===")
+    cf = cloudflared_path()
+    print(f"  cloudflared: {cf or 'NOT FOUND'}")
+    pid = read_tunnel_pid()
+    if pid:
+        print(f"  Process:     running (PID {pid})")
+    else:
+        print("  Process:     stopped")
+    url = read_tunnel_url()
+    print(f"  Public URL:  {url or '(none yet)'}")
+    named = CLOUDFLARE_DIR / "config.yml"
+    print(f"  Named cfg:   {'yes' if named.exists() else 'no'} ({named})")
+    if TUNNEL_LOG.exists():
+        print(f"  Log:         {TUNNEL_LOG}")
+
+
+def action_cloudflare_tunnel() -> None:
+    print(
+        """
+=== Cloudflare Tunnel ===
+  Exposes the app on HTTPS without router port-forward (good for Converge/CGNAT).
+  Local + LAN URLs keep working.
+
+  1) Start quick tunnel (temporary trycloudflare.com URL)
+  2) Start named tunnel (cloudflare/config.yml + your domain)
+  3) Stop tunnel
+  4) Status / show URL
+  0) Back
+"""
+    )
+    try:
+        choice = input("Select: ").strip()
+    except EOFError:
+        return
+    if choice == "1":
+        action_tunnel_start("quick")
+    elif choice == "2":
+        action_tunnel_start("named")
+    elif choice == "3":
+        action_tunnel_stop()
+    elif choice == "4":
+        action_tunnel_status()
+    else:
+        print("Back.")
 
 
 def check_http(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
@@ -204,6 +423,11 @@ def action_status() -> None:
         else:
             state = "inactive"
         print(f"  {name:10}  {state}")
+
+    if tunnel_running():
+        print(f"  {'tunnel':10}  active")
+    else:
+        print(f"  {'tunnel':10}  inactive")
 
     print("\nURLs:")
     print_urls()
@@ -262,7 +486,9 @@ def action_stop() -> None:
             run(syscmd("systemctl", "stop", name))
     if unit_exists("nginx") and confirm("Also stop Nginx?"):
         run(syscmd("systemctl", "stop", "nginx"))
-    # Stop any leftover prod_deploy detached processes
+    if tunnel_running() and confirm("Also stop Cloudflare Tunnel?", default=True):
+        action_tunnel_stop()
+    # Stop any leftover prod_deploy detached processes (apps only if still up)
     run([sys.executable, str(ROOT / "scripts" / "prod_deploy.py"), "--stop-only"], check=False)
     print("Stopped.")
 
@@ -367,6 +593,7 @@ def action_logs() -> None:
   3) Nginx follow
   4) All three (combined)
   5) Nginx error file (tail)
+  6) Cloudflare Tunnel log
   0) Back
 """
     )
@@ -381,6 +608,11 @@ def action_logs() -> None:
         run(syscmd("journalctl", "-u", "rms-api", "-u", "rms-web", "-u", "nginx", "-f", "-n", "80"))
     elif choice == "5":
         run(syscmd("tail", "-f", "/var/log/nginx/rms.error.log"), check=False)
+    elif choice == "6":
+        if TUNNEL_LOG.exists():
+            run(["tail", "-f", "-n", "80", str(TUNNEL_LOG)], check=False)
+        else:
+            print(f"  No tunnel log yet ({TUNNEL_LOG})")
     else:
         print("Back.")
 
@@ -550,6 +782,7 @@ def menu_text() -> str:
 ║  9  Logs                                 ║
 ║ 10  Re-run Nginx setup (no domain)       ║
 ║ 11  Fix service user + Node path         ║
+║ 12  Cloudflare Tunnel (public HTTPS)     ║
 ║  0  Exit                                 ║
 ╚══════════════════════════════════════════╝
 """
@@ -567,6 +800,7 @@ ACTIONS = {
     "9": action_logs,
     "10": action_setup_nginx,
     "11": action_fix_service_user,
+    "12": action_cloudflare_tunnel,
 }
 
 

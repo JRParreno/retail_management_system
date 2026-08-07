@@ -17,6 +17,12 @@ class PartLineInput(BaseModel):
     override_reason: str | None = Field(default=None, max_length=255)
 
 
+class PartLineRemoveBody(BaseModel):
+    """Reason is required when removing a part from an open job."""
+
+    reason: str = Field(min_length=1, max_length=255)
+
+
 class LaborLineInput(BaseModel):
     """Labor line; commission rate copied from mechanic when omitted."""
 
@@ -131,9 +137,7 @@ class TransactionCreate(BaseModel):
         if self.transaction_type == TransactionType.SERVICE_JOB:
             required = {
                 "customer_name": self.customer_name,
-                "customer_phone": self.customer_phone,
                 "motorcycle_model": self.motorcycle_model,
-                "plate_number": self.plate_number,
             }
             missing = [k for k, v in required.items() if not (v and str(v).strip())]
             if missing:
@@ -218,9 +222,9 @@ class TransactionDetailRead(TransactionRead):
 
 class ServiceJobCreate(BaseModel):
     customer_name: str = Field(min_length=1, max_length=150)
-    customer_phone: str = Field(min_length=1, max_length=40)
+    customer_phone: str | None = Field(default=None, max_length=40)
     motorcycle_model: str = Field(min_length=1, max_length=120)
-    plate_number: str = Field(min_length=1, max_length=32)
+    plate_number: str | None = Field(default=None, max_length=32)
     motorcycle_color: str | None = Field(default=None, max_length=60)
     odometer_km: int | None = Field(default=None, ge=0)
     diagnosis_notes: str | None = None

@@ -56,7 +56,6 @@ async function proxy(req: NextRequest, { params }: Params) {
     );
   }
 
-  const body = await res.arrayBuffer();
   const upstreamId = res.headers.get("x-request-id") ?? requestId;
 
   if (res.status >= 500) {
@@ -74,6 +73,18 @@ async function proxy(req: NextRequest, { params }: Params) {
       requestId: upstreamId,
     });
   }
+
+  // 204/205 must not include a body; forwarding an empty buffer can break clients.
+  if (res.status === 204 || res.status === 205) {
+    return new NextResponse(null, {
+      status: res.status,
+      headers: {
+        "X-Request-Id": upstreamId,
+      },
+    });
+  }
+
+  const body = await res.arrayBuffer();
 
   return new NextResponse(body, {
     status: res.status,

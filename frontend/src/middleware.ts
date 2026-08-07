@@ -3,16 +3,24 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC = ["/login"];
 
 /**
- * Redirect while keeping the request host (LAN IP / localhost).
- * Avoid `new URL("/path")` without a base — that throws Invalid URL.
- * Prefer cloning nextUrl over a relative Location header (Next 15 can
- * mis-parse relative redirects when bound to 0.0.0.0 + HTTPS).
+ * Redirect while keeping the public request host (LAN IP, localhost,
+ * Cloudflare / Tailscale hostname). Next bound to 127.0.0.1 often fills
+ * nextUrl with localhost:3000 even when Host / X-Forwarded-* say otherwise.
  */
 function redirectTo(req: NextRequest, pathname: string) {
-  const url = req.nextUrl.clone();
-  url.pathname = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  url.search = "";
-  return NextResponse.redirect(url);
+  const forwardedHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const hostHeader = req.headers.get("host")?.split(",")[0]?.trim();
+  const host = forwardedHost || hostHeader || req.nextUrl.host;
+
+  const protoHeader = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const proto =
+    protoHeader === "http" || protoHeader === "https"
+      ? protoHeader
+      : req.nextUrl.protocol.replace(":", "") || "http";
+
+  // Build from scratch so origin port (:3000) never leaks into Location.
+  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  return NextResponse.redirect(new URL(`${proto}://${host}${path}`));
 }
 
 export function middleware(req: NextRequest) {

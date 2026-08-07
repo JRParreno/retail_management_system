@@ -30,6 +30,7 @@ from app.schemas.transaction import (
     DirectSaleCreate,
     LaborLineInput,
     PartLineInput,
+    PartLineRemoveBody,
     ServiceJobCreate,
     StatusUpdate,
     TransactionDetailRead,
@@ -382,6 +383,49 @@ def add_part_line(
     db.commit()
     db.refresh(line)
     return line
+
+
+@router.post(
+    "/{transaction_id}/part-lines/{line_id}/remove",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_part_line(
+    transaction_id: UUID,
+    line_id: UUID,
+    body: PartLineRemoveBody,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
+) -> None:
+    transaction = db.get(Transaction, transaction_id)
+    if transaction is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transaction not found",
+        )
+    if transaction.status not in _editable_statuses():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove lines from this transaction status",
+        )
+
+    line = db.get(TransactionPartLine, line_id)
+    if line is None or line.transaction_id != transaction_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Part line not found",
+        )
+
+    product = db.get(Product, line.product_id)
+    product_label = product.name if product else str(line.product_id)
+    reason = body.reason.strip()
+    note = f"Removed part: {product_label} × {line.quantity} — {reason}"
+    if transaction.internal_notes and transaction.internal_notes.strip():
+        transaction.internal_notes = f"{transaction.internal_notes.strip()}\n{note}"
+    else:
+        transaction.internal_notes = note
+
+    db.delete(line)
+    db.commit()
 
 
 @router.post(

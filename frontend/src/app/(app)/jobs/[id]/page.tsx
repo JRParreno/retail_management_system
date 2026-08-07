@@ -3,21 +3,46 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ScanBarcode } from "lucide-react";
+import { ScanBarcode, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { BarcodeScanModal } from "@/components/pos/barcode-scan-modal";
 import { PaymentDialog } from "@/components/pos/payment-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableCombobox } from "@/components/ui/searchable-combobox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { clientApi, toastError } from "@/lib/client-api";
 import type { Mechanic, Paginated, Product, Transaction } from "@/lib/types";
 import { formatPeso } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+const PART_REMOVE_REASONS = [
+  { value: "Wrong part selected", label: "Wrong part selected" },
+  { value: "Customer changed mind", label: "Customer changed mind" },
+  { value: "Duplicate entry", label: "Duplicate entry" },
+  { value: "Not needed / not used", label: "Not needed / not used" },
+  { value: "Wrong quantity", label: "Wrong quantity" },
+  { value: "Damaged or defective", label: "Damaged or defective" },
+  { value: "Other", label: "Other" },
+] as const;
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -32,16 +57,29 @@ export default function JobDetailPage() {
   const [includeLabor, setIncludeLabor] = useState(false);
   const [partLaborService, setPartLaborService] = useState("");
   const [partLaborFee, setPartLaborFee] = useState("");
+  const [partLaborInfo, setPartLaborInfo] = useState("");
   const [partMechanicId, setPartMechanicId] = useState("");
   const [serviceName, setServiceName] = useState("");
   const [laborFee, setLaborFee] = useState("");
   const [mechanicId, setMechanicId] = useState<string>("");
   const [payOpen, setPayOpen] = useState(false);
+  const [removeLineId, setRemoveLineId] = useState<string | null>(null);
+  const [removeReason, setRemoveReason] = useState<string | null>(null);
+  const [removeOtherNote, setRemoveOtherNote] = useState("");
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   const selectedProduct = useMemo(
     () => products.find((p) => p.id === productId) ?? null,
     [products, productId],
   );
+
+  const removeTarget = useMemo(() => {
+    if (!tx || !removeLineId) return null;
+    const line = tx.part_lines.find((l) => l.id === removeLineId);
+    if (!line) return null;
+    const product = products.find((p) => p.id === line.product_id);
+    return { line, product };
+  }, [tx, removeLineId, products]);
 
   function applyProductSelection(product: Product) {
     setProductId(product.id);
@@ -75,6 +113,44 @@ export default function JobDetailPage() {
     load();
   }, [load]);
 
+  function closeRemoveDialog() {
+    setRemoveLineId(null);
+    setRemoveReason(null);
+    setRemoveOtherNote("");
+    setRemoveBusy(false);
+  }
+
+  async function confirmRemovePart() {
+    if (!removeLineId || !removeReason) {
+      toast.error("Select a reason to remove this part");
+      return;
+    }
+    const reason =
+      removeReason === "Other"
+        ? removeOtherNote.trim()
+          ? `Other: ${removeOtherNote.trim()}`
+          : ""
+        : removeReason;
+    if (!reason) {
+      toast.error("Enter a short note for Other");
+      return;
+    }
+
+    setRemoveBusy(true);
+    try {
+      await clientApi(`/transactions/${id}/part-lines/${removeLineId}/remove`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
+      toast.success("Part removed");
+      closeRemoveDialog();
+      await load();
+    } catch (err) {
+      toastError(err);
+      setRemoveBusy(false);
+    }
+  }
+
   async function addPartByProduct(product: Product, quantity = Number(qty) || 1) {
     if (includeLabor) {
       if (!partMechanicId) {
@@ -99,11 +175,12 @@ export default function JobDetailPage() {
       if (includeLabor) {
         const service =
           partLaborService.trim() || `Install ${product.name}`;
+        const info = partLaborInfo.trim();
         await clientApi(`/transactions/${id}/labor-lines`, {
           method: "POST",
           body: JSON.stringify({
             service_name: service,
-            description: `Labor for part: ${product.name} (${product.barcode})`,
+            description: info || null,
             original_price: partLaborFee,
             actual_price: partLaborFee,
             mechanic_id: partMechanicId,
@@ -113,6 +190,7 @@ export default function JobDetailPage() {
         setIncludeLabor(false);
         setPartLaborService("");
         setPartLaborFee("");
+        setPartLaborInfo("");
         setPartMechanicId("");
       } else {
         toast.success(`Added ${product.name}`);
@@ -168,7 +246,7 @@ export default function JobDetailPage() {
   }
 
   useBarcodeScanner((code) => {
-    if (tx?.status !== "IN_PROGRESS" || payOpen || scanOpen) return;
+    if (tx?.status !== "IN_PROGRESS" || payOpen || scanOpen || removeLineId) return;
     void resolveBarcode(code);
   });
 
@@ -232,12 +310,16 @@ export default function JobDetailPage() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <div className="mb-1 flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{tx.plate_number}</h1>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {tx.plate_number?.trim() || tx.motorcycle_model || "Service job"}
+            </h1>
             <Badge>{tx.status}</Badge>
             <Badge variant="secondary">{tx.document_number}</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            {tx.customer_name} · {tx.customer_phone} · {tx.motorcycle_model}
+            {[tx.customer_name, tx.customer_phone, tx.motorcycle_model]
+              .filter((v) => v && String(v).trim())
+              .join(" · ")}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -286,9 +368,11 @@ export default function JobDetailPage() {
           <ul className="mb-4 space-y-2 text-sm">
             {tx.part_lines.map((line) => {
               const product = products.find((p) => p.id === line.product_id);
+              const canRemove =
+                tx.status === "IN_PROGRESS" || tx.status === "DONE";
               return (
                 <li key={line.id} className="flex justify-between gap-2 border-b py-2">
-                  <span>
+                  <span className="min-w-0">
                     <span className="font-medium">
                       {product?.name ?? "Product"}
                     </span>
@@ -299,8 +383,26 @@ export default function JobDetailPage() {
                     ) : null}
                     <span className="text-muted-foreground"> × {line.quantity}</span>
                   </span>
-                  <span className="tabular-nums">
-                    {formatPeso(Number(line.actual_selling_price) * line.quantity)}
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="tabular-nums">
+                      {formatPeso(Number(line.actual_selling_price) * line.quantity)}
+                    </span>
+                    {canRemove ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-9 text-muted-foreground hover:text-destructive"
+                        title="Remove part"
+                        onClick={() => {
+                          setRemoveLineId(line.id);
+                          setRemoveReason(null);
+                          setRemoveOtherNote("");
+                        }}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    ) : null}
                   </span>
                 </li>
               );
@@ -402,6 +504,15 @@ export default function JobDetailPage() {
                       value={partLaborFee}
                       onChange={(e) => setPartLaborFee(e.target.value)}
                       placeholder="0.00"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Info (optional)</Label>
+                    <Input
+                      className="min-h-11"
+                      value={partLaborInfo}
+                      onChange={(e) => setPartLaborInfo(e.target.value)}
+                      placeholder="Notes about this labor"
                     />
                   </div>
                   <div className="space-y-2">
@@ -633,6 +744,83 @@ export default function JobDetailPage() {
           void resolveBarcode(code);
         }}
       />
+
+      <Dialog
+        open={removeLineId != null}
+        onOpenChange={(open) => {
+          if (!open) closeRemoveDialog();
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove part</DialogTitle>
+            <DialogDescription>
+              {removeTarget
+                ? `Remove ${removeTarget.product?.name ?? "this part"} × ${removeTarget.line.quantity} from this job.`
+                : "Select why this part should be removed."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Select
+                value={removeReason}
+                onValueChange={(value) => {
+                  setRemoveReason(value);
+                  if (value !== "Other") setRemoveOtherNote("");
+                }}
+                items={PART_REMOVE_REASONS.map((r) => ({
+                  value: r.value,
+                  label: r.label,
+                }))}
+              >
+                <SelectTrigger className="min-h-11 w-full">
+                  <SelectValue placeholder="Select a reason" />
+                </SelectTrigger>
+                <SelectContent align="start" className="w-[var(--anchor-width)]">
+                  {PART_REMOVE_REASONS.map((reason) => (
+                    <SelectItem key={reason.value} value={reason.value}>
+                      {reason.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {removeReason === "Other" ? (
+              <div className="space-y-2">
+                <Label htmlFor="remove-other-note">Details</Label>
+                <Input
+                  id="remove-other-note"
+                  className="min-h-11"
+                  placeholder="Brief note"
+                  value={removeOtherNote}
+                  onChange={(e) => setRemoveOtherNote(e.target.value)}
+                />
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11"
+              disabled={removeBusy}
+              onClick={closeRemoveDialog}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="min-h-11"
+              disabled={removeBusy || !removeReason}
+              onClick={() => void confirmRemovePart()}
+            >
+              {removeBusy ? "Removing…" : "Remove part"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <PaymentDialog
         open={payOpen}

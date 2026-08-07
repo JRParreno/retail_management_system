@@ -31,6 +31,8 @@ export default function NewJobPage() {
         method: "POST",
         body: JSON.stringify({
           ...form,
+          customer_phone: form.customer_phone.trim() || null,
+          plate_number: form.plate_number.trim() || null,
           odometer_km: form.odometer_km ? Number(form.odometer_km) : null,
           motorcycle_color: form.motorcycle_color || null,
           diagnosis_notes: form.diagnosis_notes || null,
@@ -55,9 +57,9 @@ export default function NewJobPage() {
       <form onSubmit={onSubmit} className="space-y-4 rounded-xl border bg-card p-4">
         {(
           [
-            ["plate_number", "Plate number", "e.g. ABC 1234"],
+            ["plate_number", "Plate number (optional)", "e.g. ABC 1234"],
             ["customer_name", "Customer name", "Who owns the bike"],
-            ["customer_phone", "Phone number", "09xxxxxxxxx"],
+            ["customer_phone", "Phone number (optional)", "09xxxxxxxxx"],
             ["motorcycle_model", "Motorcycle model", "e.g. Honda Click 125"],
             ["motorcycle_color", "Color (optional)", "e.g. Red"],
             ["odometer_km", "Odometer km (optional)", "Current km reading"],

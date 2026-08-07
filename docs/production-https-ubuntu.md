@@ -52,6 +52,8 @@ chmod +x run_prod_menu.sh
 | 8 | Reload Nginx |
 | 9 | Logs |
 | 10 | Re-run Nginx setup |
+| 11 | Fix service user + Node path |
+| 12 | Cloudflare Tunnel (quick / named / stop / status) |
 
 Templates: `deploy/ubuntu/`. Domain + Certbot steps remain in §2 below if you add a domain later.
 
