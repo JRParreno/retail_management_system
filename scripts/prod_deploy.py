@@ -16,7 +16,6 @@ Usage (from repo root):
   python scripts/prod_deploy.py --with-tunnel quick
   python scripts/prod_deploy.py --with-tunnel named
   ./run_prod.sh
-  .\\run_prod.ps1
 """
 
 from __future__ import annotations
@@ -39,7 +38,6 @@ BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
 CLOUDFLARE = ROOT / "cloudflare"
 LOGS = ROOT / "logs"
-IS_WIN = os.name == "nt"
 
 BACKEND_PID = LOGS / "prod_backend.pid"
 FRONTEND_PID = LOGS / "prod_frontend.pid"
@@ -53,8 +51,6 @@ APP_PORT = 3000
 
 
 def py_exe() -> Path:
-    if IS_WIN:
-        return BACKEND / ".venv" / "Scripts" / "python.exe"
     unix = BACKEND / ".venv" / "bin" / "python"
     if unix.exists():
         return unix
@@ -62,9 +58,16 @@ def py_exe() -> Path:
 
 
 def ensure_backend_venv() -> None:
+    """Create .venv if needed, bootstrap pip, and install requirements.txt."""
     if not py_exe().exists():
         print("Creating backend virtualenv…")
-        venv.create(BACKEND / ".venv", with_pip=True)
+        try:
+            venv.create(BACKEND / ".venv", with_pip=True)
+        except Exception as exc:  # noqa: BLE001
+            raise SystemExit(
+                f"Failed to create virtualenv: {exc}\n"
+                "Install: sudo apt install -y python3-venv python3-pip"
+            ) from exc
 
     python = py_exe()
     if not python.exists():
@@ -87,13 +90,13 @@ def ensure_backend_venv() -> None:
 
 
 def npm_cmd() -> str:
-    return "npm.cmd" if IS_WIN else "npm"
+    return "npm"
 
 
 def docker_cmd() -> list[str]:
     if shutil.which("docker"):
         return ["docker", "compose"]
-    raise SystemExit("Docker not found. Install Docker Desktop / Docker Engine.")
+    raise SystemExit("Docker not found. Install Docker Engine.")
 
 
 def run(
@@ -286,24 +289,6 @@ def build_frontend() -> None:
 
 def pids_on_port(port: int) -> list[int]:
     pids: list[int] = []
-    if IS_WIN:
-        out = subprocess.check_output(
-            ["netstat", "-ano"], text=True, stderr=subprocess.STDOUT, errors="ignore"
-        )
-        for line in out.splitlines():
-            if f":{port}" not in line or "LISTENING" not in line.upper():
-                continue
-            parts = line.split()
-            if not parts:
-                continue
-            try:
-                pid = int(parts[-1])
-            except ValueError:
-                continue
-            if pid > 0 and pid not in pids:
-                pids.append(pid)
-        return pids
-
     for tool in (["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"], ["fuser", f"{port}/tcp"]):
         if not shutil.which(tool[0]):
             continue
@@ -324,20 +309,13 @@ def stop_pid(pid: int) -> None:
     if pid <= 0:
         return
     try:
-        if IS_WIN:
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                check=False,
-            )
-        else:
-            os.kill(pid, signal.SIGTERM)
-            time.sleep(1)
-            try:
-                os.kill(pid, 0)
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(1)
+        try:
+            os.kill(pid, 0)
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
     except OSError:
         pass
 
@@ -368,12 +346,11 @@ def stop_production_servers() -> None:
 
 
 def cloudflared_exe() -> str:
-    path = shutil.which("cloudflared") or shutil.which("cloudflared.exe")
+    path = shutil.which("cloudflared")
     if not path:
         raise SystemExit(
             "cloudflared not found.\n"
-            "  Windows: winget install Cloudflare.cloudflared\n"
-            "  Linux:   see cloudflare/README.md\n"
+            "  See cloudflare/README.md for Linux install steps.\n"
             "Then re-run with --with-tunnel quick|named"
         )
     return path
@@ -450,25 +427,14 @@ def start_detached(cmd: list[str], *, cwd: Path, log_file: Path, pid_file: Path)
     log_fh.write(f"\n===== start {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
     log_fh.flush()
 
-    if IS_WIN:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd),
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            creationflags=subprocess.DETACHED_PROCESS
-            | subprocess.CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-        )
-    else:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd),
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-            close_fds=True,
-        )
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
     pid_file.write_text(str(proc.pid), encoding="utf-8")
     print(f"  Started PID {proc.pid} → log {log_file}")
     return proc.pid

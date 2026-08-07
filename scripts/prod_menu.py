@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+FRONTEND = ROOT / "frontend"
 IS_LINUX = sys.platform.startswith("linux")
 
 UNITS = ("rms-api", "rms-web", "nginx")
@@ -187,7 +188,7 @@ def check_http(url: str, *, timeout: float = 3.0) -> tuple[bool, str]:
 def action_status() -> None:
     print("\n=== Status ===")
     if not IS_LINUX:
-        print("This menu targets Ubuntu systemd. On Windows use .\\run_prod.ps1")
+        print("This menu targets Ubuntu/Pop!_OS with systemd.")
         return
 
     problems: list[str] = []
@@ -385,9 +386,24 @@ def action_logs() -> None:
 
 
 def action_setup_nginx() -> None:
-    print("\n=== Re-run Nginx edge setup (skip app build) ===")
+    next_bin = FRONTEND / "node_modules" / "next" / "dist" / "bin" / "next"
+    has_build = next_bin.is_file() and (FRONTEND / ".next").exists()
+    if has_build:
+        print("\n=== Re-run Nginx edge setup (skip app build) ===")
+        extra = ["--skip-build", "--yes"]
+    else:
+        print("\n=== Nginx edge setup (frontend not built yet — will install + build) ===")
+        if not shutil.which("npm"):
+            print(
+                "ERROR: npm is not installed.\n"
+                "  sudo apt install -y npm\n"
+                "  # or Node 20+: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -\n"
+                "  #             sudo apt install -y nodejs\n"
+                "Then re-run this option."
+            )
+            return
+        extra = ["--yes"]
     script = ROOT / "scripts" / "ubuntu_https_setup.py"
-    extra = ["--skip-build", "--yes"]
     if confirm("Enable self-signed HTTPS? (needed for tablet camera)"):
         extra.append("--self-signed")
     run(syscmd(sys.executable if os.geteuid() == 0 else "python3", str(script), *extra), check=False)
@@ -558,8 +574,7 @@ def main() -> None:
     os.chdir(ROOT)
 
     if not IS_LINUX:
-        print("WARNING: Production menu is meant for Ubuntu with systemd.")
-        print("On Windows use: .\\run_prod.ps1\n")
+        print("WARNING: Production menu is meant for Ubuntu/Pop!_OS with systemd.\n")
 
     jump = sys.argv[1] if len(sys.argv) > 1 else None
 

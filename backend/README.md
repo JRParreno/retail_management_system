@@ -5,13 +5,9 @@
 ```bash
 cd backend
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-# source .venv/bin/activate
-
+source .venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env   # or cp on Unix
+cp .env.example .env
 ```
 
 Ensure PostgreSQL is running and the `rms` database exists.

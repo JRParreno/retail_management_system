@@ -3,17 +3,16 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC = ["/login"];
 
 /**
- * Use a relative Location so the browser stays on whatever host the user
- * opened (LAN IP / public IP via Nginx). Absolute redirects from nextUrl
- * incorrectly become https://localhost:3000 behind a reverse proxy.
+ * Redirect while keeping the request host (LAN IP / localhost).
+ * Avoid `new URL("/path")` without a base — that throws Invalid URL.
+ * Prefer cloning nextUrl over a relative Location header (Next 15 can
+ * mis-parse relative redirects when bound to 0.0.0.0 + HTTPS).
  */
-function redirectPath(pathname: string) {
-  return new NextResponse(null, {
-    status: 307,
-    headers: {
-      Location: pathname.startsWith("/") ? pathname : `/${pathname}`,
-    },
-  });
+function redirectTo(req: NextRequest, pathname: string) {
+  const url = req.nextUrl.clone();
+  url.pathname = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  url.search = "";
+  return NextResponse.redirect(url);
 }
 
 export function middleware(req: NextRequest) {
@@ -25,15 +24,15 @@ export function middleware(req: NextRequest) {
   if (isApi) return NextResponse.next();
 
   if (!token && !isPublic && pathname !== "/") {
-    return redirectPath("/login");
+    return redirectTo(req, "/login");
   }
 
   if (token && (pathname === "/login" || pathname === "/")) {
-    return redirectPath("/dashboard");
+    return redirectTo(req, "/dashboard");
   }
 
   if (!token && pathname === "/") {
-    return redirectPath("/login");
+    return redirectTo(req, "/login");
   }
 
   return NextResponse.next();
