@@ -4,7 +4,7 @@ RMS launcher menu for Linux (Pop!_OS / Ubuntu).
 
 Usage:
   python scripts/dev_menu.py
-  ./run.sh
+  ./local_run.sh
 """
 
 from __future__ import annotations
@@ -267,7 +267,7 @@ def ensure_backend_venv() -> None:
             raise SystemExit(
                 "Could not bootstrap pip in backend/.venv.\n"
                 "Install: sudo apt install -y python3-venv python3-pip\n"
-                "Then: rm -rf backend/.venv && ./run.sh"
+                "Then: rm -rf backend/.venv && ./local_run.sh"
             )
         run([str(python), "-m", "pip", "install", "--upgrade", "pip"], cwd=BACKEND)
 

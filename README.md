@@ -14,8 +14,8 @@ All-in-one retail management and POS for a motorcycle repair shop.
 From the project root:
 
 ```bash
-chmod +x run.sh   # once
-./run.sh
+chmod +x local_run.sh   # once
+./local_run.sh
 ```
 
 Or:

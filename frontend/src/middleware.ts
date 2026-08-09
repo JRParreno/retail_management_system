@@ -3,23 +3,32 @@ import { NextRequest, NextResponse } from "next/server";
 const PUBLIC = ["/login"];
 
 /**
- * Redirect while keeping the public request host (LAN IP, localhost,
- * Cloudflare / Tailscale hostname). Next bound to 127.0.0.1 often fills
- * nextUrl with localhost:3000 even when Host / X-Forwarded-* say otherwise.
+ * Redirect while keeping the browser-facing host.
+ *
+ * - Local `next dev --experimental-https` on :3000 → keep Host (incl. port).
+ * - Cloudflare / Tailscale / Nginx on 443 → use X-Forwarded-Host and drop :3000.
+ * Ignoring Host and blindly using X-Forwarded-Host without a port caused
+ * https://127.0.0.1/login loops in local development.
  */
 function redirectTo(req: NextRequest, pathname: string) {
+  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
+  const hostHeader = req.headers.get("host")?.split(",")[0]?.trim() || "";
   const forwardedHost = req.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
-  const hostHeader = req.headers.get("host")?.split(",")[0]?.trim();
-  const host = forwardedHost || hostHeader || req.nextUrl.host;
-
   const protoHeader = req.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+
+  // Direct hit on Next's listen port (local HTTPS / LAN :3000) — never strip port.
+  const directPort = hostHeader.match(/:(\d+)$/)?.[1];
+  if (directPort && directPort !== "80" && directPort !== "443") {
+    const proto = req.nextUrl.protocol.replace(":", "") || "https";
+    return NextResponse.redirect(new URL(`${proto}://${hostHeader}${path}`));
+  }
+
+  const host = forwardedHost || hostHeader || req.nextUrl.host;
   const proto =
     protoHeader === "http" || protoHeader === "https"
       ? protoHeader
-      : req.nextUrl.protocol.replace(":", "") || "http";
+      : req.nextUrl.protocol.replace(":", "") || "https";
 
-  // Build from scratch so origin port (:3000) never leaks into Location.
-  const path = pathname.startsWith("/") ? pathname : `/${pathname}`;
   return NextResponse.redirect(new URL(`${proto}://${host}${path}`));
 }
 
@@ -31,15 +40,9 @@ export function middleware(req: NextRequest) {
 
   if (isApi) return NextResponse.next();
 
-  if (!token && !isPublic && pathname !== "/") {
-    return redirectTo(req, "/login");
-  }
-
-  if (token && (pathname === "/login" || pathname === "/")) {
-    return redirectTo(req, "/dashboard");
-  }
-
-  if (!token && pathname === "/") {
+  // Protect app routes. Do not bounce /login → /dashboard on cookie presence
+  // alone — an expired rms_token would loop (middleware ↔ layout).
+  if (!token && !isPublic) {
     return redirectTo(req, "/login");
   }
 
