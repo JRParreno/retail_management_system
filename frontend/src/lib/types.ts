@@ -49,6 +49,15 @@ export type Mechanic = {
   created_at: string;
 };
 
+export type MotorcycleModel = {
+  id: string;
+  brand: string;
+  name: string;
+  display_name: string;
+  is_active: boolean;
+  created_at: string;
+};
+
 export type MechanicProfileLaborLine = {
   id: string;
   transaction_id: string;

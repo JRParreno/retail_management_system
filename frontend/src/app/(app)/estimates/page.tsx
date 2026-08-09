@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { MotorcycleModelField } from "@/components/jobs/motorcycle-model-field";
 import { useShop } from "@/components/shop/shop-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -200,12 +201,12 @@ export default function EstimatePage() {
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="est-model">Motorcycle model</Label>
-            <Input
+            <MotorcycleModelField
               id="est-model"
-              className="min-h-11"
               value={draft.motorcycle_model}
-              onChange={(e) => updateField("motorcycle_model", e.target.value)}
+              onChange={(motorcycle_model) =>
+                updateField("motorcycle_model", motorcycle_model)
+              }
             />
           </div>
           <div className="space-y-2">

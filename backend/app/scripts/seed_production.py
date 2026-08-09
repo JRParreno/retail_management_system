@@ -78,6 +78,11 @@ def seed_production(*, reset_admin_password: bool = True) -> None:
     finally:
         db.close()
 
+    # Catalog reference data (not demo sales data)
+    from app.scripts.seed_motorcycle_models import seed_motorcycle_models
+
+    seed_motorcycle_models()
+
 
 if __name__ == "__main__":
     seed_production(reset_admin_password=True)

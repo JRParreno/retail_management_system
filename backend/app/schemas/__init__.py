@@ -19,6 +19,7 @@ from app.schemas.mechanic import (
     MechanicRead,
     MechanicUpdate,
 )
+from app.schemas.motorcycle import MotorcycleModelCreate, MotorcycleModelRead
 from app.schemas.notification import NotificationCreate, NotificationRead, NotificationUpdate
 from app.schemas.payment import PaymentCreate, PaymentCreateBody, PaymentRead
 from app.schemas.product import (
@@ -69,6 +70,8 @@ __all__ = [
     "MechanicCreate",
     "MechanicUpdate",
     "MechanicRead",
+    "MotorcycleModelCreate",
+    "MotorcycleModelRead",
     "ProductCategoryCreate",
     "ProductCategoryUpdate",
     "ProductCategoryRead",

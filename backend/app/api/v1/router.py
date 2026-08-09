@@ -4,6 +4,7 @@ from app.api.v1 import (
     auth,
     branches,
     mechanics,
+    motorcycle_models,
     notifications,
     products,
     reports,
@@ -21,6 +22,7 @@ api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(branches.router)
 api_router.include_router(mechanics.router)
+api_router.include_router(motorcycle_models.router)
 api_router.include_router(products.router)
 api_router.include_router(shifts.router)
 api_router.include_router(uploads.router)

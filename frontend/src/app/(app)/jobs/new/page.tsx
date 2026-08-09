@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import { MotorcycleModelField } from "@/components/jobs/motorcycle-model-field";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,10 +56,26 @@ export default function NewJobPage() {
         </p>
       </div>
       <form onSubmit={onSubmit} className="space-y-4 rounded-xl border bg-card p-4">
+        <div className="space-y-2">
+          <Label htmlFor="customer_name">Customer name</Label>
+          <Input
+            id="customer_name"
+            className="min-h-11"
+            required
+            placeholder="Who owns the bike"
+            value={form.customer_name}
+            onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
+          />
+        </div>
+
+        <MotorcycleModelField
+          required
+          value={form.motorcycle_model}
+          onChange={(motorcycle_model) => setForm({ ...form, motorcycle_model })}
+        />
+
         {(
           [
-            ["customer_name", "Customer name", "Who owns the bike"],
-            ["motorcycle_model", "Motorcycle model", "e.g. Honda Click 125"],
             ["plate_number", "Plate number (optional)", "e.g. ABC 1234"],
             ["customer_phone", "Phone number (optional)", "09xxxxxxxxx"],
             ["motorcycle_color", "Color (optional)", "e.g. Red"],

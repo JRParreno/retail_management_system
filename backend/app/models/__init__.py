@@ -19,6 +19,7 @@ from app.models.branch import (
 )
 from app.models.inventory import StockAdjustment
 from app.models.mechanic import Mechanic
+from app.models.motorcycle import MotorcycleModel
 from app.models.notification import Notification
 from app.models.payment import Payment
 from app.models.product import Product, ProductCategory
@@ -46,6 +47,7 @@ __all__ = [
     "StockTransferLine",
     "User",
     "Mechanic",
+    "MotorcycleModel",
     "ProductCategory",
     "Product",
     "StockAdjustment",

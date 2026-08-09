@@ -145,13 +145,18 @@ def seed() -> None:
                 )
                 print(f"Created branch stock for {barcode} @ Main")
 
+        from app.scripts.seed_motorcycle_models import seed_motorcycle_models
+
         db.commit()
-        print("Seed complete.")
+        print("Demo seed items committed.")
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+
+    seed_motorcycle_models()
+    print("Seed complete.")
 
 
 if __name__ == "__main__":
