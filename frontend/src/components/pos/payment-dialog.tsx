@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -20,6 +21,8 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   balanceDue: number;
+  /** When true, cashier can pay less than the full balance (service jobs). */
+  allowPartial?: boolean;
   onPaid: (payment: {
     payment_method: PaymentMethod;
     amount: string;
@@ -30,13 +33,19 @@ type Props = {
   }) => Promise<void> | void;
 };
 
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 export function PaymentDialog({
   open,
   onOpenChange,
   balanceDue,
+  allowPartial = false,
   onPaid,
 }: Props) {
   const [method, setMethod] = useState<PaymentMethod>("CASH");
+  const [payAmount, setPayAmount] = useState("");
   const [tendered, setTendered] = useState("");
   const [reference, setReference] = useState("");
   const [proofUrl, setProofUrl] = useState<string | null>(null);
@@ -46,16 +55,21 @@ export function PaymentDialog({
   const streamRef = useRef<MediaStream | null>(null);
   const [cameraOn, setCameraOn] = useState(false);
 
+  const balance = roundMoney(Math.max(0, balanceDue));
+
   useEffect(() => {
     if (!open) {
       stopCamera();
       setMethod("CASH");
+      setPayAmount("");
       setTendered("");
       setReference("");
       setProofUrl(null);
       setPreview(null);
+      return;
     }
-  }, [open]);
+    setPayAmount(balance > 0 ? balance.toFixed(2) : "");
+  }, [open, balance]);
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -108,12 +122,23 @@ export function PaymentDialog({
     }
   }
 
+  const payNum = roundMoney(Number(payAmount || 0));
+  const chargeAmount = allowPartial ? payNum : balance;
   const tenderNum = Number(tendered || 0);
-  const change = method === "CASH" ? Math.max(0, tenderNum - balanceDue) : 0;
+  const change =
+    method === "CASH" ? Math.max(0, roundMoney(tenderNum - chargeAmount)) : 0;
+
+  const amountValid =
+    chargeAmount > 0 && (!allowPartial || chargeAmount <= balance + 0.001);
+
   const canPay =
-    method === "CASH"
-      ? tenderNum >= balanceDue
-      : Boolean(reference.trim() && proofUrl);
+    amountValid &&
+    (method === "CASH"
+      ? tenderNum >= chargeAmount
+      : Boolean(reference.trim() && proofUrl));
+
+  const isPartial =
+    allowPartial && chargeAmount > 0 && chargeAmount < balance - 0.001;
 
   async function submit() {
     if (!canPay) return;
@@ -121,7 +146,7 @@ export function PaymentDialog({
     try {
       await onPaid({
         payment_method: method,
-        amount: balanceDue.toFixed(2),
+        amount: chargeAmount.toFixed(2),
         ...(method === "CASH"
           ? {
               amount_tendered: tenderNum.toFixed(2),
@@ -144,7 +169,14 @@ export function PaymentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Collect payment · {formatPeso(balanceDue)}</DialogTitle>
+          <DialogTitle>
+            Collect payment · balance {formatPeso(balance)}
+          </DialogTitle>
+          <DialogDescription>
+            {allowPartial
+              ? "You can take a partial payment now. Enter any amount up to the balance — the job stays open until the remaining balance is paid in full."
+              : "Enter cash tendered or GCash details to complete this payment in full."}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-2">
@@ -164,6 +196,67 @@ export function PaymentDialog({
           ))}
         </div>
 
+        {allowPartial ? (
+          <div className="space-y-2">
+            <Label>Amount to collect</Label>
+            <Input
+              className="min-h-11 text-lg"
+              inputMode="decimal"
+              value={payAmount}
+              onChange={(e) => setPayAmount(e.target.value)}
+              placeholder="0.00"
+            />
+            <p className="text-xs text-muted-foreground">
+              Tip: use <span className="font-medium text-foreground">Full</span>{" "}
+              to settle now, or{" "}
+              <span className="font-medium text-foreground">Half</span> / a custom
+              amount for a deposit or partial.
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: "Full", value: balance },
+                { label: "Half", value: roundMoney(balance / 2) },
+                {
+                  label: "Custom",
+                  value: null as number | null,
+                },
+              ].map((item) =>
+                item.value == null ? (
+                  <Button
+                    key={item.label}
+                    type="button"
+                    variant="secondary"
+                    className="min-h-11"
+                    onClick={() => setPayAmount("")}
+                  >
+                    Clear
+                  </Button>
+                ) : (
+                  <Button
+                    key={item.label}
+                    type="button"
+                    variant="secondary"
+                    className="min-h-11"
+                    onClick={() => setPayAmount(item.value!.toFixed(2))}
+                  >
+                    {item.label}
+                  </Button>
+                ),
+              )}
+            </div>
+            {isPartial ? (
+              <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-950 dark:text-amber-100">
+                Partial payment of {formatPeso(chargeAmount)}. Remaining after
+                this: {formatPeso(roundMoney(balance - chargeAmount))}.
+              </p>
+            ) : chargeAmount > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                This will settle the full balance.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {method === "CASH" ? (
           <div className="space-y-3">
             <div className="space-y-2">
@@ -177,10 +270,13 @@ export function PaymentDialog({
               />
             </div>
             <p className="text-sm text-muted-foreground">
-              Change: <span className="font-semibold text-foreground">{formatPeso(change)}</span>
+              Change:{" "}
+              <span className="font-semibold text-foreground">
+                {formatPeso(change)}
+              </span>
             </p>
             <div className="grid grid-cols-3 gap-2">
-              {[balanceDue, 500, 1000].map((amt) => (
+              {[chargeAmount || balance, 500, 1000].map((amt) => (
                 <Button
                   key={amt}
                   type="button"
@@ -210,7 +306,10 @@ export function PaymentDialog({
                 <div className="space-y-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={preview || `${process.env.NEXT_PUBLIC_BACKEND_URL}${proofUrl}`}
+                    src={
+                      preview ||
+                      `${process.env.NEXT_PUBLIC_BACKEND_URL}${proofUrl}`
+                    }
                     alt="GCash proof"
                     className="max-h-48 w-full rounded-lg border object-contain"
                   />
@@ -238,7 +337,11 @@ export function PaymentDialog({
                     playsInline
                     muted
                   />
-                  <Button type="button" className="min-h-11 w-full" onClick={captureProof}>
+                  <Button
+                    type="button"
+                    className="min-h-11 w-full"
+                    onClick={captureProof}
+                  >
                     <Camera className="mr-2 size-4" /> Capture proof
                   </Button>
                 </div>
@@ -262,7 +365,11 @@ export function PaymentDialog({
           disabled={!canPay || busy}
           onClick={submit}
         >
-          {busy ? "Processing…" : "Confirm payment"}
+          {busy
+            ? "Processing…"
+            : isPartial
+              ? `Confirm partial · ${formatPeso(chargeAmount)}`
+              : `Confirm payment · ${formatPeso(chargeAmount)}`}
         </Button>
       </DialogContent>
     </Dialog>

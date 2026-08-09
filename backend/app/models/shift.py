@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -44,9 +44,19 @@ class CashierShift(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheduled_end_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    close_timing: Mapped[str | None] = mapped_column(String(20), nullable=True)
     close_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_mechanic_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("mechanics.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     cashier = relationship("User", back_populates="shifts")
     branch = relationship("Branch")
+    first_mechanic = relationship("Mechanic", foreign_keys=[first_mechanic_id])
     transactions = relationship("Transaction", back_populates="shift")
     return_voids = relationship("ReturnVoid", back_populates="shift")

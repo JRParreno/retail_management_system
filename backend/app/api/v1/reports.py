@@ -53,8 +53,10 @@ def report_summary(
     labor_sales = ZERO
     cogs = ZERO
     commission_total = ZERO
+    commission_gross_total = ZERO
+    commission_waived_total = ZERO
     ticket_count = len(transactions)
-    mechanic_totals: dict[UUID, dict[str, Decimal]] = {}
+    mechanic_totals: dict[UUID, dict[str, Decimal | int | bool]] = {}
 
     # Historical integrity: use line snapshots only — never Product.current_*
     # or BranchPrice. Changing catalog/branch prices must not rewrite past tickets.
@@ -64,15 +66,42 @@ def report_summary(
             cogs += line.cost_price_snapshot * line.quantity
         for line in txn.labor_lines:
             labor_sales += line.actual_price
-            payout = line.mechanic_payout_amount or ZERO
-            if line.mechanic_payout_amount is not None:
-                commission_total += line.mechanic_payout_amount
+            gross = (
+                line.mechanic_payout_gross
+                if line.mechanic_payout_gross is not None
+                else (
+                    ZERO
+                    if line.commission_waived
+                    else (line.mechanic_payout_amount or ZERO)
+                )
+            )
+            if line.mechanic_payout_gross is None and line.mechanic_payout_amount is not None:
+                if not line.commission_waived:
+                    gross = line.mechanic_payout_amount
+            net = ZERO if line.commission_waived else (line.mechanic_payout_amount or ZERO)
+            waived = gross - net
+            commission_gross_total += gross
+            commission_waived_total += waived
+            commission_total += net
             if line.mechanic_id is not None:
                 bucket = mechanic_totals.setdefault(
-                    line.mechanic_id, {"labor_sales": ZERO, "commission_total": ZERO}
+                    line.mechanic_id,
+                    {
+                        "labor_sales": ZERO,
+                        "commission_gross": ZERO,
+                        "commission_waived": ZERO,
+                        "commission_total": ZERO,
+                        "line_count": 0,
+                        "is_first_mechanic_waived": False,
+                    },
                 )
                 bucket["labor_sales"] += line.actual_price
-                bucket["commission_total"] += payout
+                bucket["commission_gross"] += gross
+                bucket["commission_waived"] += waived
+                bucket["commission_total"] += net
+                bucket["line_count"] = int(bucket["line_count"]) + 1
+                if line.commission_waived:
+                    bucket["is_first_mechanic_waived"] = True
 
     gross_revenue = parts_sales + labor_sales
     parts_profit = parts_sales - cogs
@@ -114,8 +143,12 @@ def report_summary(
                 MechanicCommissionRow(
                     mechanic_id=mechanic_id,
                     nickname=mechanic.nickname if mechanic else "Unknown",
-                    labor_sales=totals["labor_sales"],
-                    commission_total=totals["commission_total"],
+                    labor_sales=totals["labor_sales"],  # type: ignore[arg-type]
+                    commission_gross=totals["commission_gross"],  # type: ignore[arg-type]
+                    commission_waived=totals["commission_waived"],  # type: ignore[arg-type]
+                    commission_total=totals["commission_total"],  # type: ignore[arg-type]
+                    line_count=int(totals["line_count"]),
+                    is_first_mechanic_waived=bool(totals["is_first_mechanic_waived"]),
                 )
             )
         mechanic_commissions.sort(key=lambda row: row.commission_total, reverse=True)
@@ -128,6 +161,8 @@ def report_summary(
         labor_sales=labor_sales,
         avg_ticket=avg_ticket,
         commission_total=commission_total,
+        commission_gross_total=commission_gross_total,
+        commission_waived_total=commission_waived_total,
         low_stock_count=low_stock_count,
         parts_profit=parts_profit,
         labor_profit_before_commission=labor_profit_before_commission,

@@ -23,6 +23,12 @@ class PartLineRemoveBody(BaseModel):
     reason: str = Field(min_length=1, max_length=255)
 
 
+class LaborLineRemoveBody(BaseModel):
+    """Reason is required when removing labor from an open job."""
+
+    reason: str = Field(min_length=1, max_length=255)
+
+
 class LaborLineInput(BaseModel):
     """Labor line; commission rate copied from mechanic when omitted."""
 

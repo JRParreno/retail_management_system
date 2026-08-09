@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { FileDown } from "lucide-react";
 
 import { useBranch } from "@/components/branch/branch-context";
+import { useShop } from "@/components/shop/shop-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,11 +28,29 @@ function formatRangeLabel(start: string, end: string) {
   return s === e ? s : `${s} – ${e}`;
 }
 
+function fileSafeName(name: string) {
+  return (
+    name
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "Shop"
+  );
+}
+
 export default function ReportsPage() {
-  const { activeBranch } = useBranch();
+  const router = useRouter();
+  const { activeBranch, user } = useBranch();
+  const { settings } = useShop();
+  const isAdmin = user?.role === "ADMIN";
   const [start, setStart] = useState(todayISO());
   const [end, setEnd] = useState(todayISO());
   const [summary, setSummary] = useState<ReportSummary | null>(null);
+
+  useEffect(() => {
+    if (user && user.role !== "ADMIN") {
+      router.replace("/dashboard");
+    }
+  }, [user, router]);
 
   async function load(s = start, e = end) {
     try {
@@ -44,9 +64,14 @@ export default function ReportsPage() {
   }
 
   useEffect(() => {
+    if (!isAdmin) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isAdmin]);
+
+  if (user && !isAdmin) {
+    return null;
+  }
 
   function preset(days: number) {
     const endDate = new Date();
@@ -62,25 +87,39 @@ export default function ReportsPage() {
   function exportPdf() {
     if (!summary) return;
     const previous = document.title;
-    document.title = `MotoShop-Report-${start}_to_${end}`;
+    document.title = `${fileSafeName(settings.business_name)}-Report-${start}_to_${end}`;
     window.print();
     document.title = previous;
   }
 
-  const profitRows = summary
-    ? ([
-        ["Parts profit", formatPeso(summary.parts_profit)],
-        ["Labor (before commission)", formatPeso(summary.labor_profit_before_commission)],
-        ["Gross profit", formatPeso(summary.gross_profit)],
-        ["Commissions", formatPeso(summary.commission_total)],
-        ["Net profit", formatPeso(summary.net_profit)],
-      ] as const)
-    : [];
+  const profitRows =
+    summary && isAdmin
+      ? ([
+          ["Parts profit", formatPeso(summary.parts_profit)],
+          [
+            "Labor (before commission)",
+            formatPeso(summary.labor_profit_before_commission),
+          ],
+          ["Gross profit", formatPeso(summary.gross_profit)],
+          [
+            "Commission gross",
+            formatPeso(summary.commission_gross_total ?? summary.commission_total),
+          ],
+          [
+            "Commission waived",
+            formatPeso(summary.commission_waived_total ?? 0),
+          ],
+          ["Commission net", formatPeso(summary.commission_total)],
+          ["Net profit", formatPeso(summary.net_profit)],
+        ] as const)
+      : [];
 
   const opsRows = summary
     ? ([
         ["Gross revenue", formatPeso(summary.gross_revenue)],
-        ["COGS", formatPeso(summary.cogs)],
+        ...(isAdmin
+          ? ([["COGS", formatPeso(summary.cogs)]] as const)
+          : []),
         ["Parts sales", formatPeso(summary.parts_sales)],
         ["Labor sales", formatPeso(summary.labor_sales)],
         ["Avg ticket", formatPeso(summary.avg_ticket)],
@@ -95,7 +134,8 @@ export default function ReportsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
           <p className="text-sm text-muted-foreground">
-            Profit for {activeBranch?.name ?? "active branch"} — export PDF anytime
+            {isAdmin ? "Profit & sales" : "Sales"} for{" "}
+            {activeBranch?.name ?? "active branch"} — export PDF anytime
           </p>
         </div>
         <Button
@@ -148,19 +188,21 @@ export default function ReportsPage() {
       {summary ? (
         <>
           <div className="report-screen-only space-y-4">
-            <div>
-              <h2 className="mb-2 text-lg font-semibold">Profit</h2>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {profitRows.map(([label, value]) => (
-                  <div key={label} className="rounded-xl border bg-card p-4">
-                    <p className="text-sm text-muted-foreground">{label}</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">
-                      {value}
-                    </p>
-                  </div>
-                ))}
+            {isAdmin && profitRows.length ? (
+              <div>
+                <h2 className="mb-2 text-lg font-semibold">Profit</h2>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {profitRows.map(([label, value]) => (
+                    <div key={label} className="rounded-xl border bg-card p-4">
+                      <p className="text-sm text-muted-foreground">{label}</p>
+                      <p className="mt-1 text-2xl font-semibold tabular-nums">
+                        {value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             <div>
               <h2 className="mb-2 text-lg font-semibold">Sales overview</h2>
@@ -179,25 +221,40 @@ export default function ReportsPage() {
             {summary.mechanic_commissions?.length ? (
               <div>
                 <h2 className="mb-2 text-lg font-semibold">
-                  Commission by mechanic
+                  Commission computation by mechanic
                 </h2>
                 <div className="overflow-x-auto rounded-xl border bg-card">
-                  <table className="w-full min-w-[480px] text-left text-sm">
+                  <table className="w-full min-w-[640px] text-left text-sm">
                     <thead className="border-b bg-muted/40">
                       <tr>
                         <th className="px-3 py-3">Mechanic</th>
                         <th className="px-3 py-3">Labor sales</th>
-                        <th className="px-3 py-3">Commission</th>
+                        <th className="px-3 py-3">Gross</th>
+                        <th className="px-3 py-3">Waived</th>
+                        <th className="px-3 py-3">Net payout</th>
                       </tr>
                     </thead>
                     <tbody>
                       {summary.mechanic_commissions.map((row) => (
                         <tr key={row.mechanic_id} className="border-b last:border-0">
-                          <td className="px-3 py-3 font-medium">{row.nickname}</td>
+                          <td className="px-3 py-3 font-medium">
+                            {row.nickname}
+                            {row.is_first_mechanic_waived ? (
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                (first / waived)
+                              </span>
+                            ) : null}
+                          </td>
                           <td className="px-3 py-3 tabular-nums">
                             {formatPeso(row.labor_sales)}
                           </td>
                           <td className="px-3 py-3 tabular-nums">
+                            {formatPeso(row.commission_gross ?? row.commission_total)}
+                          </td>
+                          <td className="px-3 py-3 tabular-nums">
+                            {formatPeso(row.commission_waived ?? 0)}
+                          </td>
+                          <td className="px-3 py-3 tabular-nums font-medium">
                             {formatPeso(row.commission_total)}
                           </td>
                         </tr>
@@ -210,7 +267,10 @@ export default function ReportsPage() {
           </div>
 
           <div className="report-print-area report-print-only">
-            <h1>MotoShop RMS — Profit & Sales Report</h1>
+            <h1>
+              {settings.business_name} —{" "}
+              {isAdmin ? "Profit & Sales Report" : "Sales Report"}
+            </h1>
             <p className="report-print-meta">
               Branch: {activeBranch?.name ?? "—"} ({activeBranch?.code ?? "—"})
               <br />
@@ -218,23 +278,29 @@ export default function ReportsPage() {
               <br />
               Generated: {new Date().toLocaleString("en-PH")}
             </p>
-            <h2 style={{ fontSize: "13pt", marginBottom: "6pt" }}>Profit</h2>
-            <table className="report-print-table">
-              <thead>
-                <tr>
-                  <th>Metric</th>
-                  <th>Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {profitRows.map(([label, value]) => (
-                  <tr key={label}>
-                    <td>{label}</td>
-                    <td>{value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {isAdmin && profitRows.length ? (
+              <>
+                <h2 style={{ fontSize: "13pt", marginBottom: "6pt" }}>
+                  Profit
+                </h2>
+                <table className="report-print-table">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profitRows.map(([label, value]) => (
+                      <tr key={label}>
+                        <td>{label}</td>
+                        <td>{value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            ) : null}
             <h2 style={{ fontSize: "13pt", margin: "14pt 0 6pt" }}>
               Sales overview
             </h2>
@@ -257,21 +323,30 @@ export default function ReportsPage() {
             {summary.mechanic_commissions?.length ? (
               <>
                 <h2 style={{ fontSize: "13pt", margin: "14pt 0 6pt" }}>
-                  Commission by mechanic
+                  Commission computation by mechanic
                 </h2>
                 <table className="report-print-table">
                   <thead>
                     <tr>
                       <th>Mechanic</th>
                       <th>Labor</th>
-                      <th>Commission</th>
+                      <th>Gross</th>
+                      <th>Waived</th>
+                      <th>Net</th>
                     </tr>
                   </thead>
                   <tbody>
                     {summary.mechanic_commissions.map((row) => (
                       <tr key={row.mechanic_id}>
-                        <td>{row.nickname}</td>
+                        <td>
+                          {row.nickname}
+                          {row.is_first_mechanic_waived ? " (first/waived)" : ""}
+                        </td>
                         <td>{formatPeso(row.labor_sales)}</td>
+                        <td>
+                          {formatPeso(row.commission_gross ?? row.commission_total)}
+                        </td>
+                        <td>{formatPeso(row.commission_waived ?? 0)}</td>
                         <td>{formatPeso(row.commission_total)}</td>
                       </tr>
                     ))}

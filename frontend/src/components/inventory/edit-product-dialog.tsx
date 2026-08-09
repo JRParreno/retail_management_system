@@ -176,11 +176,6 @@ export function EditProductDialog({
                 setPrintLabel({
                   barcode: product.barcode,
                   name: name.trim() || product.name,
-                  priceLabel: formatPeso(
-                    Number.isFinite(Number(sellingPrice))
-                      ? Number(sellingPrice).toFixed(2)
-                      : product.current_selling_price,
-                  ),
                 })
               }
             >

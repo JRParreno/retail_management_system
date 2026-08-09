@@ -87,5 +87,17 @@ class ProductRead(BaseModel):
     min_stock_threshold: int
     category_id: UUID | None
     is_active: bool
+    deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class ProductDeletionImpact(BaseModel):
+    product_id: UUID
+    can_hard_delete: bool
+    catalog_stock: int
+    branch_stock: int
+    transaction_lines: int
+    stock_adjustments: int
+    transfer_lines: int
+    return_lines: int

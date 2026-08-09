@@ -52,12 +52,20 @@ export type Mechanic = {
 export type MechanicProfileLaborLine = {
   id: string;
   transaction_id: string;
+  document_number: string | null;
   service_name: string;
+  description: string | null;
   original_price: string;
   actual_price: string;
   mechanic_commission_rate: string | null;
   mechanic_payout_amount: string | null;
+  customer_name: string | null;
+  customer_phone: string | null;
+  motorcycle_model: string | null;
+  plate_number: string | null;
+  motorcycle_color: string | null;
   created_at: string;
+  paid_at: string | null;
 };
 
 export type MechanicProfile = {
@@ -86,8 +94,20 @@ export type Product = {
   min_stock_threshold: number;
   category_id: string | null;
   is_active: boolean;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ProductDeletionImpact = {
+  product_id: string;
+  can_hard_delete: boolean;
+  catalog_stock: number;
+  branch_stock: number;
+  transaction_lines: number;
+  stock_adjustments: number;
+  transfer_lines: number;
+  return_lines: number;
 };
 
 export type ProductCategory = {
@@ -190,7 +210,10 @@ export type CashierShift = {
   status: "OPEN" | "CLOSED";
   opened_at: string;
   closed_at: string | null;
+  scheduled_end_at: string | null;
+  close_timing: "ON_TIME" | "EARLY" | "EXTENDED" | null;
   close_notes: string | null;
+  first_mechanic_id: string | null;
 };
 
 export type Paginated<T> = {
@@ -211,14 +234,11 @@ export type ReportSummary = {
   net_profit: string;
   avg_ticket: string;
   commission_total: string;
+  commission_gross_total: string;
+  commission_waived_total: string;
   low_stock_count: number;
   transaction_count: number;
-  mechanic_commissions: {
-    mechanic_id: string;
-    nickname: string;
-    labor_sales: string;
-    commission_total: string;
-  }[];
+  mechanic_commissions: MechanicCommissionRow[];
 };
 
 export type RefundablePartLine = {
@@ -284,6 +304,50 @@ export type ReturnVoid = {
   created_at: string;
   part_lines: ReturnVoidPartLine[];
   labor_lines: ReturnVoidLaborLine[];
+};
+
+export type ShopSettings = {
+  business_name: string;
+  primary_color: string;
+  cashier_shift_start: string;
+  cashier_shift_end: string;
+  waive_first_mechanic_commission: boolean;
+};
+
+export type MechanicCommissionRow = {
+  mechanic_id: string;
+  nickname: string;
+  labor_sales: string;
+  commission_gross: string;
+  commission_waived: string;
+  commission_total: string;
+  line_count: number;
+  is_first_mechanic_waived: boolean;
+};
+
+export type MechanicCommissionComputation = {
+  mechanic_id: string;
+  nickname: string;
+  labor_sales: string;
+  commission_gross: string;
+  commission_waived: string;
+  commission_net: string;
+  line_count: number;
+  is_first_mechanic: boolean;
+  commission_waived_for_policy: boolean;
+};
+
+export type CommissionComputationReport = {
+  day: string;
+  policy_enabled: boolean;
+  applied: boolean;
+  first_mechanic_id: string | null;
+  first_mechanic_nickname: string | null;
+  mechanics: MechanicCommissionComputation[];
+  labor_sales_total: string;
+  commission_gross_total: string;
+  commission_waived_total: string;
+  commission_net_total: string;
 };
 
 export function formatPeso(value: string | number | null | undefined) {

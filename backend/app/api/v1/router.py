@@ -9,6 +9,7 @@ from app.api.v1 import (
     reports,
     return_voids,
     shifts,
+    shop_settings,
     transactions,
     transfers,
     uploads,
@@ -28,3 +29,4 @@ api_router.include_router(transfers.router)
 api_router.include_router(return_voids.router)
 api_router.include_router(notifications.router)
 api_router.include_router(reports.router)
+api_router.include_router(shop_settings.router)

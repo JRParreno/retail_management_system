@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
@@ -64,6 +64,7 @@ def get_mechanic_profile(
     lines = list(
         db.scalars(
             select(TransactionLaborLine)
+            .options(selectinload(TransactionLaborLine.transaction))
             .join(Transaction, Transaction.id == TransactionLaborLine.transaction_id)
             .where(
                 TransactionLaborLine.mechanic_id == mechanic_id,
@@ -83,9 +84,29 @@ def get_mechanic_profile(
     )
     job_count = len({line.transaction_id for line in lines})
 
-    recent_lines = [
-        MechanicProfileLaborLine.model_validate(line) for line in lines[:20]
-    ]
+    recent_lines: list[MechanicProfileLaborLine] = []
+    for line in lines[:40]:
+        tx = line.transaction
+        recent_lines.append(
+            MechanicProfileLaborLine(
+                id=line.id,
+                transaction_id=line.transaction_id,
+                document_number=tx.document_number if tx else None,
+                service_name=line.service_name,
+                description=line.description,
+                original_price=line.original_price,
+                actual_price=line.actual_price,
+                mechanic_commission_rate=line.mechanic_commission_rate,
+                mechanic_payout_amount=line.mechanic_payout_amount,
+                customer_name=tx.customer_name if tx else None,
+                customer_phone=tx.customer_phone if tx else None,
+                motorcycle_model=tx.motorcycle_model if tx else None,
+                plate_number=tx.plate_number if tx else None,
+                motorcycle_color=tx.motorcycle_color if tx else None,
+                created_at=line.created_at,
+                paid_at=tx.paid_at if tx else None,
+            )
+        )
 
     return MechanicProfileRead(
         id=mechanic.id,

@@ -84,6 +84,11 @@ def create_transfer(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Product {line_in.product_id} not found",
             )
+        if not product.is_active or product.deleted_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{product.name} is disabled and cannot be transferred",
+            )
 
         from_stock = get_or_create_branch_stock(
             db, branch_id=body.from_branch_id, product=product

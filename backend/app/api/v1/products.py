@@ -1,17 +1,22 @@
+from datetime import datetime, timezone
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import secrets
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
-from app.models.branch import Branch, BranchPrice, BranchStock
+from app.models.branch import Branch, BranchPrice, BranchStock, StockTransferLine
 from app.models.enums import NotificationType, Role, StockAdjustmentType
 from app.models.inventory import StockAdjustment
 from app.models.notification import Notification
 from app.models.product import Product, ProductCategory
+from app.models.return_void import ReturnVoidPartLine
+from app.models.transaction import TransactionPartLine
 from app.models.user import User
 from app.schemas.common import PaginatedResponse
 from app.schemas.inventory import StockAdjustmentRead, StockAdjustRequest
@@ -20,12 +25,25 @@ from app.schemas.product import (
     ProductCategoryRead,
     ProductCategoryUpdate,
     ProductCreate,
+    ProductDeletionImpact,
     ProductRead,
     ProductUpdate,
 )
 from app.services.stock import get_or_create_branch_stock
 
 router = APIRouter(tags=["products"])
+
+ProductLifecycle = Literal["active", "disabled", "deleted", "all"]
+
+
+def _apply_lifecycle(stmt, lifecycle: ProductLifecycle):
+    if lifecycle == "active":
+        return stmt.where(Product.deleted_at.is_(None), Product.is_active.is_(True))
+    if lifecycle == "disabled":
+        return stmt.where(Product.deleted_at.is_(None), Product.is_active.is_(False))
+    if lifecycle == "deleted":
+        return stmt.where(Product.deleted_at.is_not(None))
+    return stmt
 
 
 def _overlay_products(
@@ -147,15 +165,17 @@ def delete_category(
 
 @router.get("/products/brands", response_model=list[str])
 def list_brands(
+    lifecycle: ProductLifecycle = Query(default="active"),
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
 ) -> list[str]:
-    rows = db.scalars(
+    stmt = (
         select(Product.brand)
         .where(Product.brand.is_not(None), Product.brand != "")
         .distinct()
         .order_by(Product.brand)
-    ).all()
+    )
+    rows = db.scalars(_apply_lifecycle(stmt, lifecycle)).all()
     return [b for b in rows if b]
 
 
@@ -186,14 +206,15 @@ def list_products(
     q: str | None = Query(default=None),
     category_id: UUID | None = Query(default=None),
     brand: str | None = Query(default=None),
+    lifecycle: ProductLifecycle = Query(default="active"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
     active_branch_id: UUID = Depends(get_active_branch_id),
 ) -> PaginatedResponse[ProductRead]:
-    stmt = select(Product)
-    count_stmt = select(func.count()).select_from(Product)
+    stmt = _apply_lifecycle(select(Product), lifecycle)
+    count_stmt = _apply_lifecycle(select(func.count()).select_from(Product), lifecycle)
     if q:
         pattern = f"%{q.strip()}%"
         filt = or_(
@@ -308,6 +329,11 @@ def update_product(
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     data = body.model_dump(exclude_unset=True)
+    if product.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Restore this product before editing or enabling it",
+        )
     # Locked after create — accidental barcode/category changes cause messy
     # inventory history and support confusion. Name/brand/prices remain editable.
     if "barcode" in data:
@@ -353,6 +379,148 @@ def update_product(
     db.commit()
     db.refresh(product)
     return _overlay_products(db, [product], active_branch_id)[0]
+
+
+def _deletion_impact(db: Session, product: Product) -> ProductDeletionImpact:
+    branch_stock = db.scalar(
+        select(func.coalesce(func.sum(BranchStock.stock_qty), 0)).where(
+            BranchStock.product_id == product.id
+        )
+    ) or 0
+    transaction_lines = db.scalar(
+        select(func.count()).select_from(TransactionPartLine).where(
+            TransactionPartLine.product_id == product.id
+        )
+    ) or 0
+    stock_adjustments = db.scalar(
+        select(func.count()).select_from(StockAdjustment).where(
+            StockAdjustment.product_id == product.id
+        )
+    ) or 0
+    transfer_lines = db.scalar(
+        select(func.count()).select_from(StockTransferLine).where(
+            StockTransferLine.product_id == product.id
+        )
+    ) or 0
+    return_lines = db.scalar(
+        select(func.count()).select_from(ReturnVoidPartLine).where(
+            ReturnVoidPartLine.product_id == product.id
+        )
+    ) or 0
+    can_hard_delete = (
+        product.deleted_at is not None
+        and product.stock_qty == 0
+        and branch_stock == 0
+        and transaction_lines == 0
+        and stock_adjustments == 0
+        and transfer_lines == 0
+        and return_lines == 0
+    )
+    return ProductDeletionImpact(
+        product_id=product.id,
+        can_hard_delete=can_hard_delete,
+        catalog_stock=product.stock_qty,
+        branch_stock=branch_stock,
+        transaction_lines=transaction_lines,
+        stock_adjustments=stock_adjustments,
+        transfer_lines=transfer_lines,
+        return_lines=return_lines,
+    )
+
+
+@router.delete("/products/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def soft_delete_product(
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+) -> None:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    if product.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Product is already soft-deleted",
+        )
+    product.is_active = False
+    product.deleted_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+@router.post("/products/{product_id}/restore", response_model=ProductRead)
+def restore_product(
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+    active_branch_id: UUID = Depends(get_active_branch_id),
+) -> ProductRead:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    if product.deleted_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Product is not soft-deleted",
+        )
+    product.deleted_at = None
+    product.is_active = False
+    db.commit()
+    db.refresh(product)
+    return _overlay_products(db, [product], active_branch_id)[0]
+
+
+@router.get(
+    "/products/{product_id}/deletion-impact",
+    response_model=ProductDeletionImpact,
+)
+def get_product_deletion_impact(
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+) -> ProductDeletionImpact:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return _deletion_impact(db, product)
+
+
+@router.delete("/products/{product_id}/hard", status_code=status.HTTP_204_NO_CONTENT)
+def hard_delete_product(
+    product_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+) -> None:
+    product = db.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    impact = _deletion_impact(db, product)
+    if not impact.can_hard_delete:
+        blockers = []
+        if product.deleted_at is None:
+            blockers.append("soft-delete the product first")
+        if impact.catalog_stock or impact.branch_stock:
+            blockers.append("stock must be zero in every branch")
+        if impact.transaction_lines:
+            blockers.append(f"{impact.transaction_lines} transaction line(s)")
+        if impact.stock_adjustments:
+            blockers.append(f"{impact.stock_adjustments} stock adjustment(s)")
+        if impact.transfer_lines:
+            blockers.append(f"{impact.transfer_lines} transfer line(s)")
+        if impact.return_lines:
+            blockers.append(f"{impact.return_lines} return/void line(s)")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot permanently delete: " + ", ".join(blockers),
+        )
+    try:
+        db.execute(delete(Product).where(Product.id == product_id))
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Product gained history while deletion was in progress; try again",
+        ) from exc
 
 
 @router.post(

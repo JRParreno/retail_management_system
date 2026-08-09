@@ -6,6 +6,7 @@ import {
   ArrowLeftRight,
   Bike,
   Building2,
+  Calculator,
   ClipboardList,
   Clock3,
   LayoutDashboard,
@@ -14,6 +15,7 @@ import {
   Package,
   Receipt,
   RotateCcw,
+  Settings,
   ShoppingCart,
   Users,
   Wrench,
@@ -21,6 +23,7 @@ import {
 import { useState } from "react";
 
 import { useBranch } from "@/components/branch/branch-context";
+import { useShop } from "@/components/shop/shop-context";
 import { Button } from "@/components/ui/button";
 import { SearchableCombobox } from "@/components/ui/searchable-combobox";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
@@ -31,15 +34,17 @@ const NAV: { href: string; label: string; icon: typeof Bike; roles?: Role[] }[] 
   [
     { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/jobs", label: "Job Board", icon: ClipboardList },
+    { href: "/estimates", label: "Estimate", icon: Calculator },
     { href: "/pos", label: "Direct Sale", icon: ShoppingCart },
     { href: "/refunds", label: "Refunds", icon: RotateCcw },
     { href: "/inventory", label: "Inventory", icon: Package },
     { href: "/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["ADMIN"] },
-    { href: "/mechanics", label: "Mechanics", icon: Wrench },
+    { href: "/mechanics", label: "Mechanics", icon: Wrench, roles: ["ADMIN"] },
     { href: "/shifts", label: "Shifts", icon: Clock3 },
-    { href: "/reports", label: "Reports", icon: Receipt },
+    { href: "/reports", label: "Reports", icon: Receipt, roles: ["ADMIN"] },
     { href: "/branches", label: "Branches", icon: Building2, roles: ["ADMIN"] },
     { href: "/users", label: "Users", icon: Users, roles: ["ADMIN"] },
+    { href: "/settings", label: "Shop settings", icon: Settings, roles: ["ADMIN"] },
   ];
 
 function NavLinks({
@@ -118,6 +123,7 @@ function SidebarChrome({
   onNavigate?: () => void;
 }) {
   const router = useRouter();
+  const { settings } = useShop();
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -134,7 +140,7 @@ function SidebarChrome({
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold tracking-tight text-sidebar-foreground">
-              MotoShop RMS
+              {settings.business_name}
             </p>
             <p className="truncate text-xs text-sidebar-foreground/60">
               {user.full_name}
@@ -167,6 +173,7 @@ function SidebarChrome({
 
 export function AppSidebar({ user }: { user: User }) {
   const [open, setOpen] = useState(false);
+  const { settings } = useShop();
 
   return (
     <>
@@ -195,7 +202,7 @@ export function AppSidebar({ user }: { user: User }) {
         </Sheet>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Bike className="size-5 shrink-0 text-primary" />
-          <span className="truncate font-semibold">MotoShop RMS</span>
+          <span className="truncate font-semibold">{settings.business_name}</span>
         </div>
       </div>
     </>

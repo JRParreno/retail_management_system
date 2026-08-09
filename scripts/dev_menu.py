@@ -10,8 +10,10 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -22,6 +24,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
+
+DEV_API_PORT = 8000
+DEV_APP_PORT = 3000
 
 
 def py_exe() -> Path:
@@ -163,6 +168,150 @@ def run(cmd: list[str], *, cwd: Path | None = None, check: bool = True) -> int:
     return result.returncode
 
 
+def pids_on_port(port: int) -> list[int]:
+    pids: list[int] = []
+    if shutil.which("lsof"):
+        probe = subprocess.run(
+            ["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for token in re.split(r"[\s,]+", (probe.stdout or "").strip()):
+            if token.isdigit():
+                pid = int(token)
+                if pid not in pids:
+                    pids.append(pid)
+        if pids:
+            return pids
+
+    if shutil.which("fuser"):
+        probe = subprocess.run(
+            ["fuser", f"{port}/tcp"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        text = (probe.stdout or "") + (probe.stderr or "")
+        for token in re.split(r"[\s,]+", text.strip()):
+            if token.isdigit():
+                pid = int(token)
+                if pid not in pids:
+                    pids.append(pid)
+        if pids:
+            return pids
+
+    if shutil.which("ss"):
+        probe = subprocess.run(
+            ["ss", "-ltnp"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in (probe.stdout or "").splitlines():
+            # Local address column contains *:3000 / 0.0.0.0:3000 / [::]:3000
+            if re.search(rf"[:\]]{port}\b", line) is None:
+                continue
+            for match in re.finditer(r"pid=(\d+)", line):
+                pid = int(match.group(1))
+                if pid not in pids:
+                    pids.append(pid)
+    return pids
+
+
+def stop_pid(pid: int) -> None:
+    if pid <= 1:
+        return
+    try:
+        # Kill process group when possible (next/uvicorn often spawn children)
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except OSError:
+            os.kill(pid, signal.SIGTERM)
+        time.sleep(0.8)
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except OSError:
+            os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def unit_active(name: str) -> bool:
+    r = subprocess.run(
+        ["systemctl", "is-active", name],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return (r.stdout or "").strip() == "active"
+
+
+def stop_conflicting_systemd(
+    *, units: tuple[str, ...] = ("rms-api", "rms-web")
+) -> None:
+    """Stop production units (Restart=always) so they cannot reclaim :3000/:8000."""
+    # Always attempt both — "activating" / race can miss a single is-active check.
+    print(f"  Stopping systemd {', '.join(units)} (if installed)…")
+    cmd = ["systemctl", "stop", *units]
+    if os.geteuid() != 0:
+        cmd = ["sudo", *cmd]
+    run(cmd, check=False)
+    # Clear failed/start-limit so a flaky unit does not immediately bounce back
+    reset = ["systemctl", "reset-failed", *units]
+    if os.geteuid() != 0:
+        reset = ["sudo", *reset]
+    subprocess.run(reset, capture_output=True, check=False)
+
+
+def wait_ports_free(ports: tuple[int, ...], *, timeout_s: float = 8.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        busy = [p for p in ports if pids_on_port(p)]
+        if not busy:
+            return True
+        # If systemd came back, stop again
+        if any(unit_active(u) for u in ("rms-api", "rms-web")):
+            stop_conflicting_systemd()
+        for port in busy:
+            for pid in pids_on_port(port):
+                print(f"  Waiting — stopping PID {pid} on :{port}")
+                stop_pid(pid)
+        time.sleep(0.5)
+    return not any(pids_on_port(p) for p in ports)
+
+
+def free_dev_ports(*, ports: tuple[int, ...] = (DEV_APP_PORT, DEV_API_PORT)) -> None:
+    """Always clear previous API/UI listeners before starting local sessions."""
+    print("\n=== Closing existing API/UI sessions ===")
+    stop_conflicting_systemd()
+
+    for port in ports:
+        for pid in pids_on_port(port):
+            print(f"  Stopping PID {pid} (port {port})")
+            stop_pid(pid)
+
+    if wait_ports_free(ports):
+        print(f"  Freed: {', '.join(str(p) for p in ports)}")
+    else:
+        still = [p for p in ports if pids_on_port(p)]
+        holders = []
+        for port in still:
+            for pid in pids_on_port(port):
+                holders.append(f":{port}→PID {pid}")
+        print(
+            f"  WARNING: still in use: {', '.join(holders) or still}\n"
+            "  Run this, then choose 5 again:\n"
+            "    sudo systemctl stop rms-api rms-web\n"
+            "    sudo systemctl disable --now rms-api rms-web   # optional while developing"
+        )
+        raise SystemExit("Ports still busy — refusing to start duplicate API/UI.")
+
+
 def open_new_terminal(title: str, command: str, cwd: Path) -> None:
     """Open a dedicated terminal window/tab for long-running services."""
     shells = [
@@ -222,7 +371,7 @@ def lan_ipv4_addresses() -> list[str]:
 
 def print_lan_urls(*, app_port: int = 3000, api_port: int = 8000) -> None:
     ips = lan_ipv4_addresses()
-    print("\nLocal network (same Wi‑Fi / LAN) — use HTTPS for tablet camera scan:")
+    print("\nLocal network (same Wi‑Fi / LAN) — use HTTPS (not http):")
     if not ips:
         print("  (could not detect LAN IP — check `ip a`)")
         print(f"  App:  https://<your-pc-ip>:{app_port}")
@@ -231,8 +380,202 @@ def print_lan_urls(*, app_port: int = 3000, api_port: int = 8000) -> None:
         for ip in ips:
             print(f"  App:  https://{ip}:{app_port}")
             print(f"  API:  http://{ip}:{api_port}/docs")
-    print("  First visit: accept the self-signed certificate warning on the tablet.")
-    print("  Allow firewall ports 3000 and 8000 if phones cannot connect (e.g. `sudo ufw allow 3000,8000/tcp`).")
+    print("  First visit: accept the certificate warning on the phone/tablet.")
+    print("  Port 3000 is HTTPS-only — http://…:3000 will fail with an empty reply.")
+    if ufw_enabled():
+        print("\n  ⚠ UFW firewall is ON — phones often cannot connect until ports are open.")
+        print("    Run menu option A, or:")
+        print(f"    sudo ufw allow {app_port}/tcp && sudo ufw allow {api_port}/tcp && sudo ufw reload")
+
+
+def ufw_enabled() -> bool:
+    conf = Path("/etc/ufw/ufw.conf")
+    try:
+        text = conf.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    for line in text.splitlines():
+        if line.strip().upper().startswith("ENABLED="):
+            return line.split("=", 1)[1].strip().lower() in {"yes", "true", "1"}
+    return False
+
+
+def action_open_lan_firewall() -> None:
+    """Open 3000/8000 in UFW so phones/tablets on Wi‑Fi can reach the app."""
+    if not shutil.which("ufw"):
+        print("ufw not installed — nothing to do.")
+        return
+    if not ufw_enabled():
+        print("UFW is not enabled. If phones still fail, check Wi‑Fi client/AP isolation.")
+        return
+    print(
+        "This opens TCP 3000 (app) and 8000 (API) for LAN devices.\n"
+        "You will be asked for your sudo password.\n"
+    )
+    cmds = [
+        ["sudo", "ufw", "allow", f"{DEV_APP_PORT}/tcp", "comment", "RMS frontend"],
+        ["sudo", "ufw", "allow", f"{DEV_API_PORT}/tcp", "comment", "RMS API"],
+        ["sudo", "ufw", "reload"],
+        ["sudo", "ufw", "status", "numbered"],
+    ]
+    for cmd in cmds:
+        print(f"→ {' '.join(cmd)}")
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            print("Failed — run the commands manually in a terminal.")
+            return
+    print("\nDone. On the phone open:")
+    print_lan_urls()
+
+
+def ensure_lan_https_cert() -> None:
+    """Keep Next experimental-https cert SANs in sync with current LAN IPs.
+
+    Without the LAN IP in the certificate, phones/tablets often refuse
+    https://192.168.x.x:3000 even though the server is listening.
+    """
+    cert_dir = FRONTEND / "certificates"
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    cert = cert_dir / "localhost.pem"
+    key = cert_dir / "localhost-key.pem"
+    ca_root = Path.home() / ".local" / "share" / "mkcert"
+    ca_cert = ca_root / "rootCA.pem"
+    ca_key = ca_root / "rootCA-key.pem"
+
+    ips = ["127.0.0.1", "0.0.0.0", "::1", *lan_ipv4_addresses()]
+    # Dedupe while preserving order
+    seen: set[str] = set()
+    unique_ips: list[str] = []
+    for ip in ips:
+        if ip not in seen:
+            seen.add(ip)
+            unique_ips.append(ip)
+
+    need_regen = True
+    if cert.is_file() and key.is_file():
+        try:
+            text = subprocess.check_output(
+                ["openssl", "x509", "-in", str(cert), "-noout", "-ext", "subjectAltName"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            )
+            # Require every current LAN IPv4 (skip wildcards / loopback already covered)
+            missing = [
+                ip
+                for ip in lan_ipv4_addresses()
+                if f"IP Address:{ip}" not in text and f"IP:{ip}" not in text
+            ]
+            need_regen = bool(missing)
+        except (OSError, subprocess.CalledProcessError):
+            need_regen = True
+
+    if not need_regen:
+        return
+
+    mkcert = shutil.which("mkcert")
+    if mkcert:
+        cmd = [
+            mkcert,
+            "-cert-file",
+            str(cert),
+            "-key-file",
+            str(key),
+            "localhost",
+            *unique_ips,
+        ]
+        print("Refreshing HTTPS cert for LAN access (mkcert)…")
+        run(cmd, cwd=FRONTEND, check=False)
+        return
+
+    if not (ca_cert.is_file() and ca_key.is_file()):
+        print(
+            "Warning: cannot refresh HTTPS cert (mkcert CA missing). "
+            "LAN IP access may show browser certificate errors."
+        )
+        return
+
+    print("Refreshing HTTPS cert for LAN access (openssl + mkcert CA)…")
+    san_lines = ["DNS.1 = localhost"]
+    for i, ip in enumerate(unique_ips, start=1):
+        san_lines.append(f"IP.{i} = {ip}")
+    cnf = (
+        "[req]\n"
+        "default_bits = 2048\n"
+        "prompt = no\n"
+        "default_md = sha256\n"
+        "distinguished_name = dn\n"
+        "req_extensions = req_ext\n"
+        "\n"
+        "[dn]\n"
+        "O = mkcert development certificate\n"
+        "CN = localhost\n"
+        "\n"
+        "[req_ext]\n"
+        "subjectAltName = @alt_names\n"
+        "\n"
+        "[alt_names]\n"
+        + "\n".join(san_lines)
+        + "\n"
+    )
+    cnf_path = cert_dir / ".san.cnf"
+    csr_path = cert_dir / ".localhost.csr"
+    try:
+        cnf_path.write_text(cnf, encoding="utf-8")
+        subprocess.check_call(
+            ["openssl", "genrsa", "-out", str(key), "2048"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.check_call(
+            [
+                "openssl",
+                "req",
+                "-new",
+                "-key",
+                str(key),
+                "-out",
+                str(csr_path),
+                "-config",
+                str(cnf_path),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.check_call(
+            [
+                "openssl",
+                "x509",
+                "-req",
+                "-in",
+                str(csr_path),
+                "-CA",
+                str(ca_cert),
+                "-CAkey",
+                str(ca_key),
+                "-CAcreateserial",
+                "-out",
+                str(cert),
+                "-days",
+                "825",
+                "-extensions",
+                "req_ext",
+                "-extfile",
+                str(cnf_path),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        os.chmod(key, 0o600)
+        os.chmod(cert, 0o644)
+        print(f"  Cert SANs include: {', '.join(unique_ips)}")
+    except (OSError, subprocess.CalledProcessError) as err:
+        print(f"Warning: HTTPS cert refresh failed: {err}")
+    finally:
+        for p in (cnf_path, csr_path):
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def ensure_backend_venv() -> None:
@@ -329,20 +672,26 @@ def action_seed_admin() -> None:
 
 def action_backend() -> None:
     ensure_backend_venv()
-    cmd = ".venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000"
+    free_dev_ports(ports=(DEV_API_PORT,))
+    cmd = (
+        f".venv/bin/python -m uvicorn app.main:app --reload "
+        f"--host 0.0.0.0 --port {DEV_API_PORT}"
+    )
     open_new_terminal("RMS Backend", cmd, BACKEND)
-    print("Backend → http://127.0.0.1:8000  (docs: /docs)")
+    print(f"Backend → http://127.0.0.1:{DEV_API_PORT}  (docs: /docs)")
     print("  Listening on 0.0.0.0 — reachable on your local network.")
     print_lan_urls()
 
 
 def action_frontend() -> None:
     ensure_frontend_deps()
+    ensure_lan_https_cert()
+    free_dev_ports(ports=(DEV_APP_PORT,))
     # package.json "dev" already binds 0.0.0.0 for LAN tablets/phones
     prefix = frontend_shell_prefix()
     cmd = f"{prefix}npm run dev"
     open_new_terminal("RMS Frontend", cmd, FRONTEND)
-    print("Frontend → https://127.0.0.1:3000  (self-signed HTTPS)")
+    print(f"Frontend → https://127.0.0.1:{DEV_APP_PORT}  (self-signed HTTPS)")
     print("  Listening on 0.0.0.0 — open the LAN URL below on phones/tablets.")
     print_lan_urls()
 
@@ -356,17 +705,32 @@ def action_setup() -> None:
 
 
 def action_start_all() -> None:
+    # Always replace leftover local or production listeners on 3000/8000
+    free_dev_ports(ports=(DEV_APP_PORT, DEV_API_PORT))
     action_docker_up()
     ensure_backend_venv()
     # migrate quietly if needed
     run([str(py_exe()), "-m", "alembic", "upgrade", "head"], cwd=BACKEND, check=False)
-    action_backend()
+    # Ports already freed above — skip per-service free in nested calls
+    cmd = (
+        f".venv/bin/python -m uvicorn app.main:app --reload "
+        f"--host 0.0.0.0 --port {DEV_API_PORT}"
+    )
+    open_new_terminal("RMS Backend", cmd, BACKEND)
+    print(f"Backend → http://127.0.0.1:{DEV_API_PORT}  (docs: /docs)")
+    print("  Listening on 0.0.0.0 — reachable on your local network.")
+    print_lan_urls()
     time.sleep(1)
-    action_frontend()
+    ensure_frontend_deps()
+    ensure_lan_https_cert()
+    prefix = frontend_shell_prefix()
+    open_new_terminal("RMS Frontend", f"{prefix}npm run dev", FRONTEND)
+    print(f"Frontend → https://127.0.0.1:{DEV_APP_PORT}  (self-signed HTTPS)")
+    print("  Listening on 0.0.0.0 — open the LAN URL below on phones/tablets.")
     print(
         "\nAll services launching (shared on local network).\n"
-        "  This PC:  http://127.0.0.1:3000\n"
-        "  API docs: http://127.0.0.1:8000/docs\n"
+        f"  This PC:  https://127.0.0.1:{DEV_APP_PORT}\n"
+        f"  API docs: http://127.0.0.1:{DEV_API_PORT}/docs\n"
         "  Login: admin / admin123  or  cashier / cashier123"
     )
     print_lan_urls()
@@ -386,11 +750,13 @@ def action_status() -> None:
     except Exception:  # noqa: BLE001
         print("Node: NO")
     print(f"npm: {npm_cmd()}")
+    print(f"UFW firewall: {'ON (phones need option A)' if ufw_enabled() else 'off / unknown'}")
     try:
         with socket.create_connection(("127.0.0.1", 5432), timeout=1):
             print("Postgres :5432: listening")
     except OSError:
         print("Postgres :5432: not listening")
+    print_lan_urls()
 
 
 MENU = """
@@ -403,11 +769,12 @@ MENU = """
 ║  3) Stop Postgres                        ║
 ║  4) Migrate + seed database              ║
 ║  5) Start ALL (Postgres + API + UI)      ║
-║     — also shared on local Wi‑Fi / LAN   ║
+║     — frees :3000/:8000 first, LAN share ║
 ║  6) Start backend only (port 8000)       ║
 ║  7) Start frontend only (port 3000)      ║
 ║  8) Status check                         ║
 ║  9) Seed / reset ADMIN only              ║
+║  A) Open LAN firewall ports (ufw sudo)   ║
 ║  0) Exit                                 ║
 ╚══════════════════════════════════════════╝
 """
@@ -425,6 +792,8 @@ def main() -> None:
         "7": action_frontend,
         "8": action_status,
         "9": action_seed_admin,
+        "a": action_open_lan_firewall,
+        "A": action_open_lan_firewall,
     }
 
     # Non-interactive: python scripts/dev_menu.py 5

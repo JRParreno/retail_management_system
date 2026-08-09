@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -164,6 +165,12 @@ class TransactionLaborLine(Base):
     )
     mechanic_payout_amount: Mapped[Decimal | None] = mapped_column(
         Numeric(12, 2), nullable=True
+    )
+    mechanic_payout_gross: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
+    commission_waived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )
     original_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     actual_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)

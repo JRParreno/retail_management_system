@@ -1,23 +1,32 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileDown, Plus, Printer } from "lucide-react";
+import { FileDown, Plus, Printer, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { AddProductDialog } from "@/components/inventory/add-product-dialog";
 import {
   BarcodeLabelPrintDialog,
+  printBarcodeLabels,
   type BarcodeLabelData,
 } from "@/components/inventory/barcode-label-print";
 import { EditProductDialog } from "@/components/inventory/edit-product-dialog";
 import { useBranch } from "@/components/branch/branch-context";
+import { useShop } from "@/components/shop/shop-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableCombobox } from "@/components/ui/searchable-combobox";
 import { clientApi, toastError } from "@/lib/client-api";
-import type { Paginated, Product, ProductCategory } from "@/lib/types";
+import type {
+  Paginated,
+  Product,
+  ProductCategory,
+  ProductDeletionImpact,
+} from "@/lib/types";
 import { formatPeso } from "@/lib/types";
+
+type ProductLifecycle = "active" | "disabled" | "deleted" | "all";
 
 function formatSnapshotDate(date: Date) {
   return date.toLocaleString("en-PH", {
@@ -37,8 +46,18 @@ function formatSnapshotFileStamp(date: Date) {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
 }
 
+function fileSafeName(name: string) {
+  return (
+    name
+      .trim()
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "Shop"
+  );
+}
+
 export default function InventoryPage() {
   const { activeBranch, user } = useBranch();
+  const { settings } = useShop();
   const isAdmin = user?.role === "ADMIN";
   const [items, setItems] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
@@ -47,12 +66,12 @@ export default function InventoryPage() {
   const [q, setQ] = useState("");
   const [categoryId, setCategoryId] = useState<string>("all");
   const [brand, setBrand] = useState<string>("all");
-  const [adjustId, setAdjustId] = useState<string | null>(null);
-  const [delta, setDelta] = useState("0");
+  const [lifecycle, setLifecycle] = useState<ProductLifecycle>("active");
   const [snapshotAt, setSnapshotAt] = useState(() => new Date());
   const [addOpen, setAddOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [printLabel, setPrintLabel] = useState<BarcodeLabelData | null>(null);
+  const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null);
 
   const categoryName = useMemo(() => {
     if (categoryId === "all") return "All categories";
@@ -62,10 +81,10 @@ export default function InventoryPage() {
   const brandLabel = brand === "all" ? "All brands" : brand;
 
   const filterSummary = useMemo(() => {
-    const parts = [brandLabel, categoryName];
+    const parts = [brandLabel, categoryName, `Status: ${lifecycle}`];
     if (q.trim()) parts.push(`Search: “${q.trim()}”`);
     return parts.join(" · ");
-  }, [brandLabel, categoryName, q]);
+  }, [brandLabel, categoryName, lifecycle, q]);
 
   const totalUnits = useMemo(
     () => items.reduce((sum, p) => sum + p.stock_qty, 0),
@@ -83,10 +102,11 @@ export default function InventoryPage() {
       if (q.trim()) params.set("q", q.trim());
       if (categoryId !== "all") params.set("category_id", categoryId);
       if (brand !== "all") params.set("brand", brand);
+      params.set("lifecycle", lifecycle);
       const [products, cats, brandList] = await Promise.all([
         clientApi<Paginated<Product>>(`/products?${params}`),
         clientApi<ProductCategory[]>("/categories"),
-        clientApi<string[]>("/products/brands"),
+        clientApi<string[]>("/products/brands?lifecycle=all"),
       ]);
       setItems(products.items);
       setTotal(products.total);
@@ -101,32 +121,87 @@ export default function InventoryPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryId, brand]);
+  }, [categoryId, brand, lifecycle]);
 
-  async function adjust(productId: string) {
-    const qtyDelta = Number(delta);
-    if (!Number.isInteger(qtyDelta) || qtyDelta === 0) {
-      toast.error("Enter a non-zero whole number (e.g. +5 or -2)");
-      return;
-    }
-    const product = items.find((p) => p.id === productId);
+  async function setProductEnabled(product: Product, isActive: boolean) {
+    setLifecycleBusyId(product.id);
     try {
-      await clientApi(`/products/${productId}/adjust`, {
-        method: "POST",
-        body: JSON.stringify({
-          quantity_delta: qtyDelta,
-          reason: "Manual adjustment",
-        }),
+      await clientApi(`/products/${product.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ is_active: isActive }),
       });
-      const after = (product?.stock_qty ?? 0) + qtyDelta;
-      toast.success(
-        `Stock updated${product ? `: ${product.stock_qty} → ${after}` : ""}`,
-      );
-      setAdjustId(null);
-      setDelta("0");
+      toast.success(`${product.name} ${isActive ? "enabled" : "disabled"}`);
       await load();
     } catch (err) {
       toastError(err);
+    } finally {
+      setLifecycleBusyId(null);
+    }
+  }
+
+  async function softDeleteProduct(product: Product) {
+    if (
+      !window.confirm(
+        `Soft delete “${product.name}”? It will be hidden from sales but can be restored.`,
+      )
+    ) {
+      return;
+    }
+    setLifecycleBusyId(product.id);
+    try {
+      await clientApi(`/products/${product.id}`, { method: "DELETE" });
+      toast.success(`${product.name} moved to deleted products`);
+      await load();
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setLifecycleBusyId(null);
+    }
+  }
+
+  async function restoreProduct(product: Product) {
+    setLifecycleBusyId(product.id);
+    try {
+      await clientApi(`/products/${product.id}/restore`, { method: "POST" });
+      toast.success(`${product.name} restored as disabled`);
+      await load();
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setLifecycleBusyId(null);
+    }
+  }
+
+  async function hardDeleteProduct(product: Product) {
+    setLifecycleBusyId(product.id);
+    try {
+      const impact = await clientApi<ProductDeletionImpact>(
+        `/products/${product.id}/deletion-impact`,
+      );
+      if (!impact.can_hard_delete) {
+        const history =
+          impact.transaction_lines +
+          impact.stock_adjustments +
+          impact.transfer_lines +
+          impact.return_lines;
+        toast.error(
+          history > 0
+            ? `Permanent deletion blocked by ${history} inventory/history record(s)`
+            : "Permanent deletion requires zero stock in every branch",
+        );
+        return;
+      }
+      const confirmation = window.prompt(
+        `Permanent deletion cannot be undone. Type the product name to continue:\n${product.name}`,
+      );
+      if (confirmation !== product.name) return;
+      await clientApi(`/products/${product.id}/hard`, { method: "DELETE" });
+      toast.success(`${product.name} permanently deleted`);
+      await load();
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setLifecycleBusyId(null);
     }
   }
 
@@ -134,12 +209,26 @@ export default function InventoryPage() {
     const stamped = new Date();
     setSnapshotAt(stamped);
     const previous = document.title;
-    document.title = `MotoShop-Inventory-${formatSnapshotFileStamp(stamped)}`;
+    document.title = `${fileSafeName(settings.business_name)}-Inventory-${formatSnapshotFileStamp(stamped)}`;
     // Wait for snapshot timestamp to paint before opening the print dialog
     window.setTimeout(() => {
       window.print();
       document.title = previous;
     }, 50);
+  }
+
+  function exportBarcodes() {
+    if (!items.length) {
+      toast.error("No products to export");
+      return;
+    }
+    printBarcodeLabels(
+      items.map((p) => ({
+        barcode: p.barcode,
+        name: p.name,
+      })),
+      1,
+    );
   }
 
   return (
@@ -149,7 +238,7 @@ export default function InventoryPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
           <p className="text-sm text-muted-foreground">
             Search and filter by brand, category, name, or barcode — export PDF
-            for stock audits
+            or barcode labels for the filtered list
             {isAdmin ? ". Admins can add products by scanning the real barcode." : ""}
           </p>
         </div>
@@ -163,6 +252,15 @@ export default function InventoryPage() {
               Add product
             </Button>
           ) : null}
+          <Button
+            className="min-h-11 gap-2"
+            variant="outline"
+            disabled={!items.length}
+            onClick={exportBarcodes}
+          >
+            <Printer className="size-4" />
+            Export barcodes
+          </Button>
           <Button
             className="min-h-11 gap-2"
             variant="outline"
@@ -207,6 +305,20 @@ export default function InventoryPage() {
             ...categories.map((c) => ({ value: c.id, label: c.name })),
           ]}
         />
+        <SearchableCombobox
+          className="lg:w-44"
+          value={lifecycle}
+          onValueChange={(value) => setLifecycle(value as ProductLifecycle)}
+          placeholder="Product status"
+          searchPlaceholder="Search status…"
+          emptyText="No status found."
+          options={[
+            { value: "active", label: "Active" },
+            { value: "disabled", label: "Disabled" },
+            { value: "deleted", label: "Deleted" },
+            { value: "all", label: "All statuses" },
+          ]}
+        />
         <Button className="min-h-11" onClick={load}>
           Search
         </Button>
@@ -221,6 +333,7 @@ export default function InventoryPage() {
               <th className="px-3 py-3">Barcode</th>
               <th className="px-3 py-3">Price</th>
               <th className="px-3 py-3">Stock</th>
+              <th className="px-3 py-3">Status</th>
               <th className="px-3 py-3" />
             </tr>
           </thead>
@@ -243,76 +356,92 @@ export default function InventoryPage() {
                     ) : null}
                   </div>
                 </td>
-                <td className="px-3 py-3 text-right">
-                  {adjustId === p.id ? (
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <span className="text-xs text-muted-foreground">
-                        ± qty
-                      </span>
-                      <Input
-                        className="h-9 w-20"
-                        inputMode="numeric"
-                        placeholder="+5"
-                        value={delta}
-                        onChange={(e) => setDelta(e.target.value)}
-                      />
-                      <Button size="sm" onClick={() => adjust(p.id)}>
-                        Apply
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setAdjustId(null);
-                          setDelta("0");
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
+                <td className="px-3 py-3">
+                  {p.deleted_at ? (
+                    <Badge variant="destructive">Deleted</Badge>
+                  ) : p.is_active ? (
+                    <Badge>Active</Badge>
                   ) : (
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          setPrintLabel({
-                            barcode: p.barcode,
-                            name: p.name,
-                            priceLabel: formatPeso(p.current_selling_price),
-                          })
-                        }
-                      >
-                        <Printer className="size-3.5" />
-                        Label
-                      </Button>
-                      {isAdmin ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setEditProduct(p)}
-                        >
-                          Edit
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setAdjustId(p.id);
-                          setDelta("0");
-                        }}
-                      >
-                        Adjust
-                      </Button>
-                    </div>
+                    <Badge variant="secondary">Disabled</Badge>
                   )}
+                </td>
+                <td className="px-3 py-3 text-right">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setPrintLabel({
+                          barcode: p.barcode,
+                          name: p.name,
+                        })
+                      }
+                    >
+                      <Printer className="size-3.5" />
+                      Label
+                    </Button>
+                    {isAdmin ? (
+                      <>
+                        {!p.deleted_at ? (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={lifecycleBusyId === p.id}
+                              onClick={() =>
+                                void setProductEnabled(p, !p.is_active)
+                              }
+                            >
+                              {p.is_active ? "Disable" : "Enable"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditProduct(p)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={lifecycleBusyId === p.id}
+                              onClick={() => void softDeleteProduct(p)}
+                            >
+                              <Trash2 className="size-3.5" />
+                              Delete
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={lifecycleBusyId === p.id}
+                              onClick={() => void restoreProduct(p)}
+                            >
+                              <RotateCcw className="size-3.5" />
+                              Restore
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              disabled={lifecycleBusyId === p.id}
+                              onClick={() => void hardDeleteProduct(p)}
+                            >
+                              <Trash2 className="size-3.5" />
+                              Permanent
+                            </Button>
+                          </>
+                        )}
+                      </>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
             {!items.length ? (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-muted-foreground">
+                <td colSpan={7} className="px-3 py-6 text-muted-foreground">
                   No products match these filters.
                 </td>
               </tr>
@@ -323,7 +452,7 @@ export default function InventoryPage() {
 
       {/* Print / PDF audit sheet */}
       <div className="report-print-area report-print-only">
-        <h1>MotoShop RMS — Inventory Stock Snapshot</h1>
+        <h1>{settings.business_name} — Inventory Stock Snapshot</h1>
         <p className="report-print-meta">
           <strong>Snapshot date:</strong> {formatSnapshotDate(snapshotAt)}
           <br />

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -29,6 +30,7 @@ from app.schemas.payment import PaymentCreateBody, PaymentRead
 from app.schemas.transaction import (
     DirectSaleCreate,
     LaborLineInput,
+    LaborLineRemoveBody,
     PartLineInput,
     PartLineRemoveBody,
     ServiceJobCreate,
@@ -429,6 +431,47 @@ def remove_part_line(
 
 
 @router.post(
+    "/{transaction_id}/labor-lines/{line_id}/remove",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def remove_labor_line(
+    transaction_id: UUID,
+    line_id: UUID,
+    body: LaborLineRemoveBody,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
+) -> None:
+    transaction = db.get(Transaction, transaction_id)
+    if transaction is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transaction not found",
+        )
+    if transaction.status not in _editable_statuses():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove lines from this transaction status",
+        )
+
+    line = db.get(TransactionLaborLine, line_id)
+    if line is None or line.transaction_id != transaction_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Labor line not found",
+        )
+
+    reason = body.reason.strip()
+    note = f"Removed labor: {line.service_name} — {reason}"
+    if transaction.internal_notes and transaction.internal_notes.strip():
+        transaction.internal_notes = f"{transaction.internal_notes.strip()}\n{note}"
+    else:
+        transaction.internal_notes = note
+
+    db.delete(line)
+    db.commit()
+
+
+@router.post(
     "/{transaction_id}/labor-lines",
     response_model=TransactionLaborLineRead,
     status_code=status.HTTP_201_CREATED,
@@ -537,6 +580,14 @@ def add_payment(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot add payment to this transaction status",
+        )
+
+    totals = compute_transaction_totals(transaction)
+    balance = totals["balance_due"]
+    if body.amount > balance + Decimal("0.01"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Payment amount exceeds balance due ({balance})",
         )
 
     _create_payment(db, transaction, body, current_user.id)

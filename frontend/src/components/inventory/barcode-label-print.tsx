@@ -18,33 +18,52 @@ import { Label } from "@/components/ui/label";
 export type BarcodeLabelData = {
   barcode: string;
   name?: string;
-  priceLabel?: string;
 };
 
-type Props = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  label: BarcodeLabelData | null;
-};
+function esc(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
-function buildLabelHtml(data: BarcodeLabelData, svgMarkup: string, copies: number) {
-  const safeName = (data.name ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const safePrice = (data.priceLabel ?? "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const safeCode = data.barcode.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const cards = Array.from({ length: copies }, () => {
-    return `<div class="label">
-      ${svgMarkup}
+function barcodeSvgMarkup(code: string): string | null {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  try {
+    JsBarcode(svg, code.trim(), {
+      format: "CODE128",
+      displayValue: false,
+      margin: 0,
+      width: 2,
+      height: 48,
+      background: "#ffffff",
+      lineColor: "#000000",
+    });
+  } catch {
+    return null;
+  }
+  return svg.outerHTML;
+}
+
+function buildSheetHtml(labels: { data: BarcodeLabelData; svg: string }[]) {
+  const cards = labels
+    .map(({ data, svg }) => {
+      const safeName = esc(data.name ?? "");
+      const safeCode = esc(data.barcode);
+      return `<div class="label">
+      ${svg}
       ${safeName ? `<div class="name">${safeName}</div>` : ""}
       <div class="code">${safeCode}</div>
-      ${safePrice ? `<div class="price">${safePrice}</div>` : ""}
     </div>`;
-  }).join("");
+    })
+    .join("");
 
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Barcode ${safeCode}</title>
+  <title>Barcode labels</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -52,6 +71,7 @@ function buildLabelHtml(data: BarcodeLabelData, svgMarkup: string, copies: numbe
       padding: 8mm;
       font-family: Arial, Helvetica, sans-serif;
       color: #000;
+      background: #fff;
     }
     .sheet {
       display: flex;
@@ -90,11 +110,6 @@ function buildLabelHtml(data: BarcodeLabelData, svgMarkup: string, copies: numbe
       font-family: ui-monospace, Consolas, monospace;
       letter-spacing: 0.02em;
     }
-    .price {
-      margin-top: 1mm;
-      font-size: 10pt;
-      font-weight: 700;
-    }
     @media print {
       body { padding: 4mm; }
       .label { border-color: #ddd; }
@@ -103,15 +118,85 @@ function buildLabelHtml(data: BarcodeLabelData, svgMarkup: string, copies: numbe
 </head>
 <body>
   <div class="sheet">${cards}</div>
-  <script>
-    window.onload = function () {
-      window.focus();
-      window.print();
-    };
-  </script>
 </body>
 </html>`;
 }
+
+/** Print one or many barcode labels (CODE128 sticker sheet). */
+export function printBarcodeLabels(
+  labels: BarcodeLabelData[],
+  copiesPerLabel = 1,
+) {
+  const expanded: BarcodeLabelData[] = [];
+  for (const label of labels) {
+    const code = label.barcode.trim();
+    if (!code) continue;
+    for (let i = 0; i < copiesPerLabel; i += 1) {
+      expanded.push({ ...label, barcode: code });
+    }
+  }
+  if (!expanded.length) {
+    toast.error("No barcodes to print");
+    return;
+  }
+
+  const rendered: { data: BarcodeLabelData; svg: string }[] = [];
+  const failed: string[] = [];
+  for (const label of expanded) {
+    const svg = barcodeSvgMarkup(label.barcode);
+    if (!svg) {
+      failed.push(label.barcode);
+      continue;
+    }
+    rendered.push({ data: label, svg });
+  }
+
+  if (!rendered.length) {
+    toast.error("Could not render barcodes for printing");
+    return;
+  }
+  if (failed.length) {
+    toast.error(`Skipped ${failed.length} invalid barcode(s)`);
+  }
+
+  const html = buildSheetHtml(rendered);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const popup = window.open(url, "_blank", "width=720,height=640");
+  if (!popup) {
+    URL.revokeObjectURL(url);
+    toast.error("Pop-up blocked — allow pop-ups to print barcode labels");
+    return;
+  }
+
+  let printed = false;
+  const triggerPrint = () => {
+    if (printed) return;
+    printed = true;
+    try {
+      popup.focus();
+      popup.print();
+    } catch {
+      // User can print manually.
+    }
+  };
+
+  try {
+    popup.addEventListener("load", () => {
+      window.setTimeout(triggerPrint, 300);
+    });
+  } catch {
+    // Fallback timeout below.
+  }
+  window.setTimeout(triggerPrint, 700);
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+type Props = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  label: BarcodeLabelData | null;
+};
 
 export function BarcodeLabelPrintDialog({ open, onOpenChange, label }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -141,7 +226,7 @@ export function BarcodeLabelPrintDialog({ open, onOpenChange, label }: Props) {
   }, [open, label]);
 
   function handlePrint() {
-    if (!label?.barcode.trim() || !svgRef.current || !ready) {
+    if (!label?.barcode.trim() || !ready) {
       toast.error("Generate or enter a barcode first");
       return;
     }
@@ -150,17 +235,7 @@ export function BarcodeLabelPrintDialog({ open, onOpenChange, label }: Props) {
       toast.error("Copies must be between 1 and 40");
       return;
     }
-
-    const svgMarkup = svgRef.current.outerHTML;
-    const html = buildLabelHtml(label, svgMarkup, count);
-    const win = window.open("", "_blank", "noopener,noreferrer,width=720,height=640");
-    if (!win) {
-      toast.error("Pop-up blocked — allow pop-ups to print labels");
-      return;
-    }
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
+    printBarcodeLabels([label], count);
   }
 
   return (
@@ -177,9 +252,6 @@ export function BarcodeLabelPrintDialog({ open, onOpenChange, label }: Props) {
                 <p className="text-sm font-semibold leading-snug">{label.name}</p>
               ) : null}
               <p className="font-mono text-xs">{label.barcode}</p>
-              {label.priceLabel ? (
-                <p className="text-sm font-semibold">{label.priceLabel}</p>
-              ) : null}
             </div>
 
             <div className="space-y-2">

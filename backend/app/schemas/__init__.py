@@ -40,6 +40,7 @@ from app.schemas.shift import CashierShiftClose, CashierShiftOpen, CashierShiftR
 from app.schemas.transaction import (
     DirectSaleCreate,
     LaborLineInput,
+    LaborLineRemoveBody,
     PartLineInput,
     PartLineRemoveBody,
     ServiceJobCreate,
@@ -82,6 +83,7 @@ __all__ = [
     "NotificationUpdate",
     "PartLineInput",
     "PartLineRemoveBody",
+    "LaborLineRemoveBody",
     "LaborLineInput",
     "TransactionPartLineCreate",
     "TransactionPartLineRead",

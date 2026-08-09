@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Scanner, type IDetectedBarcode } from "@yudiel/react-qr-scanner";
+import { useEffect, useRef, useState } from "react";
+import {
+  Scanner,
+  type IDetectedBarcode,
+  type IScannerHandle,
+} from "@yudiel/react-qr-scanner";
 import { Camera, Keyboard } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -39,10 +43,18 @@ function isSecureCameraContext() {
   return window.isSecureContext;
 }
 
+/** Rear cameras should match reality; front/webcam previews feel natural when mirrored. */
+function shouldMirrorPreview(stream: MediaStream | null): boolean {
+  const facing = stream?.getVideoTracks()[0]?.getSettings()?.facingMode;
+  return facing !== "environment";
+}
+
 export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
+  const scannerRef = useRef<IScannerHandle>(null);
   const [manual, setManual] = useState("");
   const [mode, setMode] = useState<"camera" | "manual">("camera");
   const [error, setError] = useState<string | null>(null);
+  const [mirror, setMirror] = useState(true);
   const secure = isSecureCameraContext();
 
   useEffect(() => {
@@ -50,6 +62,7 @@ export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
       setManual("");
       setError(null);
       setMode("camera");
+      setMirror(true);
       return;
     }
     // Camera APIs are blocked on http://LAN-IP — fall back to manual / BT gun.
@@ -60,6 +73,30 @@ export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
       );
     }
   }, [open, secure]);
+
+  useEffect(() => {
+    if (!open || mode !== "camera" || !secure) return;
+
+    let cancelled = false;
+    const syncMirror = () => {
+      if (cancelled) return;
+      const stream = scannerRef.current?.getStream() ?? null;
+      if (!stream) return false;
+      setMirror(shouldMirrorPreview(stream));
+      return true;
+    };
+
+    if (syncMirror()) return;
+
+    const timer = window.setInterval(() => {
+      if (syncMirror()) window.clearInterval(timer);
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [open, mode, secure]);
 
   function submitCode(code: string) {
     const trimmed = code.trim();
@@ -142,6 +179,7 @@ export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
           <div className="space-y-2">
             <div className="overflow-hidden rounded-xl border bg-black">
               <Scanner
+                ref={scannerRef}
                 formats={[...BARCODE_FORMATS]}
                 constraints={{
                   facingMode: { ideal: "environment" },
@@ -152,6 +190,10 @@ export function BarcodeScanModal({ open, onOpenChange, onScan }: Props) {
                 onError={handleCameraError}
                 styles={{
                   container: { width: "100%", minHeight: 240 },
+                  // Preview-only flip — detection still reads the raw frames.
+                  video: mirror
+                    ? { transform: "scaleX(-1)" }
+                    : { transform: "none" },
                 }}
               />
             </div>

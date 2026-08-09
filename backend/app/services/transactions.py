@@ -75,6 +75,8 @@ def apply_sale_stock_deduction(
 
 def lock_labor_commission_snapshots(db: Session, transaction: Transaction) -> None:
     for line in transaction.labor_lines:
+        if line.commission_waived:
+            continue
         if line.mechanic_commission_rate is None and line.mechanic_id is not None:
             mechanic = db.get(Mechanic, line.mechanic_id)
             if mechanic is not None:
@@ -83,9 +85,9 @@ def lock_labor_commission_snapshots(db: Session, transaction: Transaction) -> No
             continue
         fee = line.actual_price
         line.labor_fee = fee
-        line.mechanic_payout_amount = (fee * line.mechanic_commission_rate).quantize(
-            Decimal("0.01")
-        )
+        payout = (fee * line.mechanic_commission_rate).quantize(Decimal("0.01"))
+        line.mechanic_payout_amount = payout
+        line.mechanic_payout_gross = payout
 
 
 def compute_transaction_totals(transaction: Transaction) -> dict:

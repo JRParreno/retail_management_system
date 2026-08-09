@@ -5,15 +5,18 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  Calculator,
   ClipboardList,
   Package,
   Receipt,
+  RefreshCw,
   RotateCcw,
   ShoppingCart,
   Wrench,
 } from "lucide-react";
 
 import { useBranch } from "@/components/branch/branch-context";
+import { useShop } from "@/components/shop/shop-context";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { clientApi, toastError } from "@/lib/client-api";
@@ -57,19 +60,25 @@ function formatStarted(value: string | null | undefined) {
   });
 }
 
-const SHORTCUTS = [
-  { href: "/jobs/new", label: "New job", icon: ClipboardList, primary: true },
-  { href: "/pos", label: "Direct sale", icon: ShoppingCart },
+const SECONDARY_ACTIONS: {
+  href: string;
+  label: string;
+  icon: typeof ClipboardList;
+  adminOnly?: boolean;
+}[] = [
+  { href: "/estimates", label: "Estimate", icon: Calculator },
   { href: "/jobs", label: "Job board", icon: ClipboardList },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/refunds", label: "Refunds", icon: RotateCcw },
-  { href: "/mechanics", label: "Mechanics", icon: Wrench },
-  { href: "/reports", label: "Full reports", icon: Receipt },
-] as const;
+  { href: "/mechanics", label: "Mechanics", icon: Wrench, adminOnly: true },
+  { href: "/reports", label: "Reports", icon: Receipt, adminOnly: true },
+];
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { activeBranch } = useBranch();
+  const { activeBranch, user } = useBranch();
+  const { settings } = useShop();
+  const isAdmin = user?.role === "ADMIN";
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [activeJobs, setActiveJobs] = useState<Transaction[]>([]);
   const [inProgressCount, setInProgressCount] = useState(0);
@@ -138,187 +147,181 @@ export default function DashboardPage() {
   }
 
   const queuePreview = useMemo(() => activeJobs.slice(0, 8), [activeJobs]);
+  const shiftOpen = shift?.status === "OPEN";
+  const lowStockCount = summary?.low_stock_count ?? lowStockItems.length;
+  const openJobCount = inProgressCount + awaitingPayCount;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-semibold tracking-tight">
+            {settings.business_name}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            {activeBranch?.name ?? "Branch"} floor board — today&apos;s numbers,
-            open jobs, and shortcuts
+            {activeBranch?.name ?? "Branch"} · floor board
+            {!loading ? ` · ${openJobCount} open job${openJobCount === 1 ? "" : "s"}` : ""}
           </p>
         </div>
         <Button
-          className="min-h-11"
+          className="min-h-11 gap-2"
           variant="outline"
           onClick={load}
           disabled={loading}
         >
+          <RefreshCw className={cn("size-4", loading && "animate-spin")} />
           Refresh
         </Button>
       </div>
 
-      <div className="rounded-xl border bg-card p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {!loading && !shiftOpen ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-medium">Cashier shift</p>
-            <p className="text-sm text-muted-foreground">
-              {loading
-                ? "Loading…"
-                : shift?.status === "OPEN"
-                  ? `Open since ${new Date(shift.opened_at).toLocaleTimeString("en-PH")}`
-                  : "No open shift — open one before taking payments"}
+            <p className="font-medium text-amber-950 dark:text-amber-100">
+              Shift is closed
+            </p>
+            <p className="text-sm text-amber-950/80 dark:text-amber-100/80">
+              Open a cashier shift before collecting payments or deposits.
             </p>
           </div>
-          {shift?.status !== "OPEN" ? (
-            <Button className="min-h-11" onClick={openShift}>
-              Open shift
-            </Button>
-          ) : (
-            <Link
-              href="/shifts"
-              className={cn(buttonVariants({ variant: "outline" }), "min-h-11")}
-            >
-              Manage shift
-            </Link>
-          )}
+          <Button className="min-h-11 shrink-0" onClick={openShift}>
+            Open shift
+          </Button>
         </div>
-      </div>
+      ) : null}
 
-      <section className="space-y-3">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">Today</h2>
-            <p className="text-xs text-muted-foreground">
-              Live summary for {todayISO()}
-            </p>
-          </div>
+      {shiftOpen ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-card px-4 py-3 text-sm">
+          <p>
+            <span className="font-medium">Shift open</span>
+            <span className="text-muted-foreground">
+              {" "}
+              since {new Date(shift!.opened_at).toLocaleTimeString("en-PH")}
+            </span>
+          </p>
+          <Link
+            href="/shifts"
+            className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "min-h-9")}
+          >
+            Manage shift
+          </Link>
+        </div>
+      ) : null}
+
+      <section className="grid gap-2 sm:grid-cols-2">
+        <Link
+          href="/jobs/new"
+          className={cn(
+            buttonVariants(),
+            "min-h-16 justify-start gap-3 px-4 text-base",
+          )}
+        >
+          <ClipboardList className="size-6 shrink-0" />
+          <span className="text-left">
+            <span className="block font-semibold">New job</span>
+            <span className="block text-xs font-normal opacity-90">
+              Start a service bay job
+            </span>
+          </span>
+        </Link>
+        <Link
+          href="/pos"
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "min-h-16 justify-start gap-3 px-4 text-base",
+          )}
+        >
+          <ShoppingCart className="size-6 shrink-0" />
+          <span className="text-left">
+            <span className="block font-semibold">Direct sale</span>
+            <span className="block text-xs font-normal text-muted-foreground">
+              Counter checkout / parts only
+            </span>
+          </span>
+        </Link>
+      </section>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Link
+          href="/jobs?status=IN_PROGRESS"
+          className="rounded-xl border bg-card px-3 py-3 transition-colors hover:border-primary/40"
+        >
+          <p className="text-xs text-muted-foreground">In progress</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {loading ? "—" : inProgressCount}
+          </p>
+        </Link>
+        <Link
+          href="/jobs?status=DONE"
+          className="rounded-xl border bg-card px-3 py-3 transition-colors hover:border-primary/40"
+        >
+          <p className="text-xs text-muted-foreground">Awaiting pay</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {loading ? "—" : awaitingPayCount}
+          </p>
+        </Link>
+        <Link
+          href="/inventory"
+          className="rounded-xl border bg-card px-3 py-3 transition-colors hover:border-primary/40"
+        >
+          <p className="flex items-center gap-1 text-xs text-muted-foreground">
+            Low stock
+            {!loading && lowStockCount > 0 ? (
+              <AlertTriangle className="size-3.5 text-amber-600" />
+            ) : null}
+          </p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {loading ? "—" : lowStockCount}
+          </p>
+        </Link>
+        {isAdmin ? (
           <Link
             href="/reports"
-            className={cn(
-              buttonVariants({ variant: "ghost", size: "sm" }),
-              "min-h-9",
-            )}
+            className="rounded-xl border bg-card px-3 py-3 transition-colors hover:border-primary/40"
           >
-            Open reports
+            <p className="text-xs text-muted-foreground">Today sales</p>
+            <p className="mt-1 text-xl font-semibold tabular-nums sm:text-2xl">
+              {loading || !summary ? "—" : formatPeso(summary.gross_revenue)}
+            </p>
           </Link>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            {
-              label: "Gross revenue",
-              value: summary ? formatPeso(summary.gross_revenue) : "—",
-            },
-            {
-              label: "Net profit",
-              value: summary ? formatPeso(summary.net_profit) : "—",
-            },
-            {
-              label: "Tickets",
-              value: summary ? String(summary.transaction_count) : "—",
-            },
-            {
-              label: "Avg ticket",
-              value: summary ? formatPeso(summary.avg_ticket) : "—",
-            },
-          ].map((card) => (
-            <Link
-              key={card.label}
-              href="/reports"
-              className="rounded-xl border bg-card p-4 transition-colors hover:border-primary/40"
-            >
-              <p className="text-sm text-muted-foreground">{card.label}</p>
-              <p className="mt-1 text-2xl font-semibold tabular-nums">
-                {loading ? "—" : card.value}
-              </p>
-            </Link>
-          ))}
-        </div>
-        {summary && !loading ? (
-          <p className="text-xs text-muted-foreground">
-            Parts {formatPeso(summary.parts_sales)} · Labor{" "}
-            {formatPeso(summary.labor_sales)} · Commissions{" "}
-            {formatPeso(summary.commission_total)}
-          </p>
-        ) : null}
-      </section>
+        ) : (
+          <div className="rounded-xl border bg-card px-3 py-3">
+            <p className="text-xs text-muted-foreground">Today sales</p>
+            <p className="mt-1 text-xl font-semibold tabular-nums sm:text-2xl">
+              {loading || !summary ? "—" : formatPeso(summary.gross_revenue)}
+            </p>
+          </div>
+        )}
+      </div>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Work queue</h2>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Link
-            href="/jobs?status=IN_PROGRESS"
-            className="rounded-xl border bg-card p-4 transition-colors hover:border-primary/40"
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">In progress</span>
-              <ClipboardList className="size-5 text-primary" />
-            </div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {loading ? "—" : inProgressCount}
-            </p>
-          </Link>
-          <Link
-            href="/jobs?status=DONE"
-            className="rounded-xl border bg-card p-4 transition-colors hover:border-primary/40"
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Awaiting pay</span>
-              <ShoppingCart className="size-5 text-primary" />
-            </div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {loading ? "—" : awaitingPayCount}
-            </p>
-          </Link>
-          <Link
-            href="/inventory"
-            className="rounded-xl border bg-card p-4 transition-colors hover:border-primary/40"
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Low stock</span>
-              <AlertTriangle className="size-5 text-primary" />
-            </div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {loading
-                ? "—"
-                : (summary?.low_stock_count ?? lowStockItems.length)}
-            </p>
-          </Link>
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Quick actions</h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
-          {SHORTCUTS.map((item) => {
+      <div className="flex flex-wrap gap-2">
+        {SECONDARY_ACTIONS.filter((item) => isAdmin || !item.adminOnly).map(
+          (item) => {
             const Icon = item.icon;
             return (
               <Link
-                key={item.href + item.label}
+                key={item.href}
                 href={item.href}
                 className={cn(
-                  buttonVariants({
-                    variant: "primary" in item && item.primary ? "default" : "outline",
-                  }),
-                  "min-h-14 flex-col gap-1 text-xs sm:text-sm",
+                  buttonVariants({ variant: "secondary" }),
+                  "min-h-11 gap-2",
                 )}
               >
-                <Icon className="size-5" />
+                <Icon className="size-4" />
                 {item.label}
               </Link>
             );
-          })}
-        </div>
-      </section>
+          },
+        )}
+      </div>
 
-      <div className="grid gap-6 xl:grid-cols-[1.4fr_1fr]">
-        <section className="space-y-3">
-          <div className="flex items-end justify-between gap-3">
+      <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+        <section className="rounded-xl border bg-card">
+          <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
             <div>
-              <h2 className="text-lg font-semibold">Open jobs</h2>
+              <h2 className="font-semibold">Open jobs</h2>
               <p className="text-xs text-muted-foreground">
-                In progress and awaiting payment — tap a row
+                Tap a job to open it
               </p>
             </div>
             <Link
@@ -331,93 +334,114 @@ export default function DashboardPage() {
               View all
             </Link>
           </div>
-          <div className="overflow-x-auto rounded-xl border bg-card">
-            <table className="w-full min-w-[560px] text-left text-sm">
-              <thead className="border-b bg-muted/40">
-                <tr>
-                  <th className="px-3 py-3">Plate</th>
-                  <th className="px-3 py-3">Customer</th>
-                  <th className="px-3 py-3">Status</th>
-                  <th className="px-3 py-3">Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queuePreview.map((job) => (
-                  <tr
-                    key={job.id}
-                    role="link"
-                    tabIndex={0}
-                    className="cursor-pointer border-b last:border-0 hover:bg-muted/40"
-                    onClick={() => router.push(`/jobs/${job.id}`)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        router.push(`/jobs/${job.id}`);
-                      }
-                    }}
-                  >
-                    <td className="px-3 py-2.5">
-                      <p className="font-semibold">
-                        {job.plate_number?.trim() || "No plate"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {job.document_number}
-                      </p>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      {job.customer_name || "—"}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Badge variant={statusBadgeVariant(job.status)}>
-                        {statusLabel(job.status)}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">
+
+          <ul className="divide-y">
+            {queuePreview.map((job) => (
+              <li key={job.id}>
+                <button
+                  type="button"
+                  className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                  onClick={() => router.push(`/jobs/${job.id}`)}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold">
+                      {job.plate_number?.trim() ||
+                        job.motorcycle_model ||
+                        "No plate"}
+                    </span>
+                    <span className="block truncate text-sm text-muted-foreground">
+                      {job.customer_name || "Walk-in"} · {job.document_number}
+                    </span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
                       {formatStarted(job.started_at ?? job.created_at)}
-                    </td>
-                  </tr>
-                ))}
-                {!loading && !queuePreview.length ? (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-3 py-8 text-muted-foreground"
-                    >
-                      No open jobs right now.{" "}
-                      <Link href="/jobs/new" className="underline">
-                        Start a new job
-                      </Link>
-                    </td>
-                  </tr>
-                ) : null}
-                {loading ? (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-3 py-8 text-muted-foreground"
-                    >
-                      Loading jobs…
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
+                    </span>
+                  </span>
+                  <Badge
+                    variant={statusBadgeVariant(job.status)}
+                    className="shrink-0"
+                  >
+                    {statusLabel(job.status)}
+                  </Badge>
+                </button>
+              </li>
+            ))}
+
+            {!loading && !queuePreview.length ? (
+              <li className="px-4 py-8 text-sm text-muted-foreground">
+                No open jobs.{" "}
+                <Link href="/jobs/new" className="font-medium text-primary underline">
+                  Start a new job
+                </Link>
+              </li>
+            ) : null}
+
+            {loading ? (
+              <li className="px-4 py-8 text-sm text-muted-foreground">
+                Loading jobs…
+              </li>
+            ) : null}
+          </ul>
         </section>
 
-        <section className="space-y-3">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold">Needs attention</h2>
-              <p className="text-xs text-muted-foreground">
-                Low stock and top commissions today
-              </p>
-            </div>
-          </div>
+        <div className="space-y-4">
+          {isAdmin ? (
+            <section className="rounded-xl border bg-card p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="font-semibold">Today at a glance</h2>
+                <Link
+                  href="/reports"
+                  className="text-xs text-muted-foreground underline"
+                >
+                  Full reports
+                </Link>
+              </div>
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Gross</dt>
+                  <dd className="tabular-nums font-medium">
+                    {loading || !summary
+                      ? "—"
+                      : formatPeso(summary.gross_revenue)}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Net profit</dt>
+                  <dd className="tabular-nums font-medium">
+                    {loading || !summary
+                      ? "—"
+                      : formatPeso(summary.net_profit)}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Tickets</dt>
+                  <dd className="tabular-nums font-medium">
+                    {loading || !summary ? "—" : summary.transaction_count}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Avg ticket</dt>
+                  <dd className="tabular-nums font-medium">
+                    {loading || !summary
+                      ? "—"
+                      : formatPeso(summary.avg_ticket)}
+                  </dd>
+                </div>
+              </dl>
+              {summary && !loading ? (
+                <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+                  Parts {formatPeso(summary.parts_sales)} · Labor{" "}
+                  {formatPeso(summary.labor_sales)} · Commission{" "}
+                  {formatPeso(summary.commission_total)}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
-          <div className="rounded-xl border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-medium">Low stock</p>
+          <section className="rounded-xl border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="font-semibold">
+                {isAdmin ? "Needs attention" : "Low stock"}
+              </h2>
               <Link
                 href="/inventory"
                 className="text-xs text-muted-foreground underline"
@@ -435,7 +459,7 @@ export default function DashboardPage() {
                     className="flex items-center justify-between gap-2 text-sm"
                   >
                     <span className="truncate">{p.name}</span>
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                    <span className="shrink-0 tabular-nums text-amber-700 dark:text-amber-300">
                       {p.stock_qty}/{p.min_stock_threshold}
                     </span>
                   </li>
@@ -443,49 +467,49 @@ export default function DashboardPage() {
               </ul>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No low-stock SKUs on this branch.
+                Stock levels look fine on this branch.
               </p>
             )}
-          </div>
 
-          <div className="rounded-xl border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-medium">Commissions today</p>
-              <Link
-                href="/reports"
-                className="text-xs text-muted-foreground underline"
-              >
-                Details
-              </Link>
-            </div>
-            {loading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : summary?.mechanic_commissions?.length ? (
-              <ul className="space-y-2">
-                {summary.mechanic_commissions.slice(0, 5).map((row) => (
-                  <li
-                    key={row.mechanic_id}
-                    className="flex items-center justify-between gap-2 text-sm"
+            {isAdmin ? (
+              <div className="mt-4 border-t pt-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-sm font-medium">Commissions today</p>
+                  <Link
+                    href="/reports"
+                    className="text-xs text-muted-foreground underline"
                   >
-                    <Link
-                      href={`/mechanics/${row.mechanic_id}`}
-                      className="truncate font-medium hover:underline"
-                    >
-                      {row.nickname}
-                    </Link>
-                    <span className="shrink-0 tabular-nums">
-                      {formatPeso(row.commission_total)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No commissions recorded yet today.
-              </p>
-            )}
-          </div>
-        </section>
+                    Details
+                  </Link>
+                </div>
+                {summary?.mechanic_commissions?.length ? (
+                  <ul className="space-y-2">
+                    {summary.mechanic_commissions.slice(0, 4).map((row) => (
+                      <li
+                        key={row.mechanic_id}
+                        className="flex items-center justify-between gap-2 text-sm"
+                      >
+                        <Link
+                          href={`/mechanics/${row.mechanic_id}`}
+                          className="truncate font-medium hover:underline"
+                        >
+                          {row.nickname}
+                        </Link>
+                        <span className="shrink-0 tabular-nums">
+                          {formatPeso(row.commission_total)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No commissions yet today.
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </section>
+        </div>
       </div>
     </div>
   );

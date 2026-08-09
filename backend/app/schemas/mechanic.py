@@ -35,12 +35,20 @@ class MechanicProfileLaborLine(BaseModel):
 
     id: UUID
     transaction_id: UUID
+    document_number: str | None = None
     service_name: str
+    description: str | None = None
     original_price: Decimal
     actual_price: Decimal
     mechanic_commission_rate: Decimal | None
     mechanic_payout_amount: Decimal | None
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    motorcycle_model: str | None = None
+    plate_number: str | None = None
+    motorcycle_color: str | None = None
     created_at: datetime
+    paid_at: datetime | None = None
 
 
 class MechanicProfileRead(BaseModel):

@@ -2,9 +2,11 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { useBranch } from "@/components/branch/branch-context";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -16,12 +18,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { clientApi, toastError } from "@/lib/client-api";
-import type { Mechanic, User } from "@/lib/types";
+import type { Mechanic } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export default function MechanicsPage() {
+  const router = useRouter();
+  const { user } = useBranch();
+  const isAdmin = user?.role === "ADMIN";
   const [items, setItems] = useState<Mechanic[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Mechanic | null>(null);
   const [busy, setBusy] = useState(false);
@@ -32,22 +36,29 @@ export default function MechanicsPage() {
     is_active: true,
   });
 
+  useEffect(() => {
+    if (user && user.role !== "ADMIN") {
+      router.replace("/dashboard");
+    }
+  }, [user, router]);
+
   const load = useCallback(async () => {
     try {
-      const [mechs, me] = await Promise.all([
-        clientApi<Mechanic[]>("/mechanics"),
-        clientApi<User>("/auth/me"),
-      ]);
+      const mechs = await clientApi<Mechanic[]>("/mechanics");
       setItems(mechs);
-      setIsAdmin(me.role === "ADMIN");
     } catch (err) {
       toastError(err);
     }
   }, []);
 
   useEffect(() => {
+    if (!isAdmin) return;
     load();
-  }, [load]);
+  }, [isAdmin, load]);
+
+  if (user && !isAdmin) {
+    return null;
+  }
 
   function openCreate() {
     setEditing(null);
@@ -169,7 +180,22 @@ export default function MechanicsPage() {
         ) : null}
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        disablePointerDismissal
+        onOpenChange={(nextOpen, eventDetails) => {
+          if (
+            !nextOpen &&
+            (busy ||
+              eventDetails.reason === "outside-press" ||
+              eventDetails.reason === "escape-key")
+          ) {
+            eventDetails.cancel();
+            return;
+          }
+          setOpen(nextOpen);
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>

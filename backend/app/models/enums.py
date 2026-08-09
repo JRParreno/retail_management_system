@@ -41,6 +41,12 @@ class ShiftStatus(str, Enum):
     CLOSED = "CLOSED"
 
 
+class ShiftCloseTiming(str, Enum):
+    ON_TIME = "ON_TIME"
+    EARLY = "EARLY"
+    EXTENDED = "EXTENDED"
+
+
 class StockAdjustmentType(str, Enum):
     IN = "IN"
     OUT = "OUT"

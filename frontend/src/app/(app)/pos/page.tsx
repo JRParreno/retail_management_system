@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ScanBarcode } from "lucide-react";
+import { Minus, Plus, ScanBarcode, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { BarcodeScanModal } from "@/components/pos/barcode-scan-modal";
@@ -34,17 +34,32 @@ export default function PosPage() {
     setCart((prev) => {
       const existing = prev.find((l) => l.product.id === product.id);
       if (existing) {
+        if (existing.quantity >= product.stock_qty) return prev;
         return prev.map((l) =>
           l.product.id === product.id
             ? { ...l, quantity: l.quantity + 1 }
             : l,
         );
       }
+      if (product.stock_qty < 1) return prev;
       return [...prev, { product, quantity: 1 }];
     });
     if (!opts?.quiet) {
       toast.success(`Added ${product.name}`);
     }
+  }, []);
+
+  const setCartQuantity = useCallback((productId: string, next: number) => {
+    setCart((prev) =>
+      prev.map((line) => {
+        if (line.product.id !== productId) return line;
+        const quantity = Math.min(
+          line.product.stock_qty,
+          Math.max(1, Math.floor(next || 1)),
+        );
+        return { ...line, quantity };
+      }),
+    );
   }, []);
 
   const resolveBarcode = useCallback(
@@ -193,26 +208,89 @@ export default function PosPage() {
             {cart.map((line) => (
               <li
                 key={line.product.id}
-                className="flex items-center justify-between gap-2"
+                className="space-y-2 rounded-lg border p-3"
               >
-                <div>
-                  <p>{line.product.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatPeso(line.product.current_selling_price)} ×{" "}
-                    {line.quantity}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{line.product.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatPeso(line.product.current_selling_price)} each ·
+                      stock {line.product.stock_qty}
+                    </p>
+                  </div>
+                  <p className="shrink-0 tabular-nums font-medium">
+                    {formatPeso(
+                      Number(line.product.current_selling_price) *
+                        line.quantity,
+                    )}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setCart((prev) =>
-                      prev.filter((l) => l.product.id !== line.product.id),
-                    )
-                  }
-                >
-                  Remove
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-9"
+                    aria-label={`Decrease ${line.product.name} quantity`}
+                    onClick={() =>
+                      setCartQuantity(
+                        line.product.id,
+                        line.quantity - 1,
+                      )
+                    }
+                    disabled={line.quantity <= 1}
+                  >
+                    <Minus className="size-4" />
+                  </Button>
+                  <Input
+                    className="h-9 w-20 text-center tabular-nums"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={line.product.stock_qty}
+                    value={line.quantity}
+                    aria-label={`${line.product.name} quantity`}
+                    onChange={(e) =>
+                      setCartQuantity(
+                        line.product.id,
+                        Number(e.target.value),
+                      )
+                    }
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="size-9"
+                    aria-label={`Increase ${line.product.name} quantity`}
+                    onClick={() =>
+                      setCartQuantity(
+                        line.product.id,
+                        line.quantity + 1,
+                      )
+                    }
+                    disabled={line.quantity >= line.product.stock_qty}
+                  >
+                    <Plus className="size-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Qty</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto size-9"
+                    aria-label={`Remove ${line.product.name}`}
+                    onClick={() =>
+                      setCart((prev) =>
+                        prev.filter(
+                          (l) => l.product.id !== line.product.id,
+                        ),
+                      )
+                    }
+                  >
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
               </li>
             ))}
             {!cart.length ? (

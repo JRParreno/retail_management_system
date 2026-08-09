@@ -21,7 +21,6 @@ import { Label } from "@/components/ui/label";
 import { SearchableCombobox } from "@/components/ui/searchable-combobox";
 import { clientApi, toastError } from "@/lib/client-api";
 import type { Paginated, Product, ProductCategory } from "@/lib/types";
-import { formatPeso } from "@/lib/types";
 
 type Props = {
   open: boolean;
@@ -219,7 +218,6 @@ export function AddProductDialog({
       setPrintLabel({
         barcode,
         name,
-        priceLabel: formatPeso(sell.toFixed(2)),
       });
     } catch (err) {
       toastError(err);
@@ -238,13 +236,27 @@ export function AddProductDialog({
     setPrintLabel({
       barcode,
       name: form.name.trim() || undefined,
-      priceLabel: Number.isFinite(sell) && sell >= 0 ? formatPeso(sell.toFixed(2)) : undefined,
     });
   }
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog
+        open={open}
+        disablePointerDismissal
+        onOpenChange={(nextOpen, eventDetails) => {
+          if (
+            !nextOpen &&
+            (saving ||
+              eventDetails.reason === "outside-press" ||
+              eventDetails.reason === "escape-key")
+          ) {
+            eventDetails.cancel();
+            return;
+          }
+          onOpenChange(nextOpen);
+        }}
+      >
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Add product</DialogTitle>
@@ -426,6 +438,7 @@ export function AddProductDialog({
                 type="button"
                 variant="outline"
                 className="min-h-11"
+                disabled={saving}
                 onClick={() => onOpenChange(false)}
               >
                 Cancel

@@ -8,7 +8,11 @@ class MechanicCommissionRow(BaseModel):
     mechanic_id: UUID
     nickname: str
     labor_sales: Decimal
+    commission_gross: Decimal
+    commission_waived: Decimal
     commission_total: Decimal
+    line_count: int = 0
+    is_first_mechanic_waived: bool = False
 
 
 class ReportSummary(BaseModel):
@@ -19,6 +23,8 @@ class ReportSummary(BaseModel):
     labor_sales: Decimal
     avg_ticket: Decimal
     commission_total: Decimal
+    commission_gross_total: Decimal
+    commission_waived_total: Decimal
     low_stock_count: int
     parts_profit: Decimal
     labor_profit_before_commission: Decimal

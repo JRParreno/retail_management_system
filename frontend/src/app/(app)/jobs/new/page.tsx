@@ -57,10 +57,10 @@ export default function NewJobPage() {
       <form onSubmit={onSubmit} className="space-y-4 rounded-xl border bg-card p-4">
         {(
           [
-            ["plate_number", "Plate number (optional)", "e.g. ABC 1234"],
             ["customer_name", "Customer name", "Who owns the bike"],
-            ["customer_phone", "Phone number (optional)", "09xxxxxxxxx"],
             ["motorcycle_model", "Motorcycle model", "e.g. Honda Click 125"],
+            ["plate_number", "Plate number (optional)", "e.g. ABC 1234"],
+            ["customer_phone", "Phone number (optional)", "09xxxxxxxxx"],
             ["motorcycle_color", "Color (optional)", "e.g. Red"],
             ["odometer_km", "Odometer km (optional)", "Current km reading"],
           ] as const
@@ -78,7 +78,7 @@ export default function NewJobPage() {
           </div>
         ))}
         <div className="space-y-2">
-          <Label htmlFor="notes">Diagnosis / complaint</Label>
+          <Label htmlFor="notes">Diagnosis / complaint (optional)</Label>
           <Textarea
             id="notes"
             value={form.diagnosis_notes}
