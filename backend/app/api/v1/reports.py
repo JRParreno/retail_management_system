@@ -3,14 +3,15 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
 from app.models.branch import BranchStock
-from app.models.enums import Role, TransactionStatus, TransactionType
+from app.models.enums import PaymentMethod, Role, TransactionStatus, TransactionType
 from app.models.mechanic import Mechanic
+from app.models.payment import Payment
 from app.models.product import Product
 from app.models.transaction import Transaction
 from app.models.user import User
@@ -26,6 +27,7 @@ def report_summary(
     start_date: date = Query(...),
     end_date: date = Query(...),
     transaction_type: TransactionType | None = Query(default=None),
+    payment_method: PaymentMethod | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
     active_branch_id: UUID = Depends(get_active_branch_id),
@@ -42,6 +44,13 @@ def report_summary(
     ]
     if transaction_type is not None:
         filters.append(Transaction.transaction_type == transaction_type)
+    if payment_method is not None:
+        filters.append(
+            exists().where(
+                Payment.transaction_id == Transaction.id,
+                Payment.payment_method == payment_method,
+            )
+        )
 
     transactions = list(
         db.scalars(

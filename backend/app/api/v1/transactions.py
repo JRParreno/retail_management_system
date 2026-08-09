@@ -3,13 +3,14 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
 from app.models.enums import (
     DocumentPrefix,
+    PaymentMethod,
     Role,
     ShiftStatus,
     TransactionStatus,
@@ -195,6 +196,7 @@ def _mark_paid_if_covered(
 def list_transactions(
     status_filter: TransactionStatus | None = Query(default=None, alias="status"),
     transaction_type: TransactionType | None = Query(default=None),
+    payment_method: PaymentMethod | None = Query(default=None),
     q: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
@@ -218,6 +220,13 @@ def list_transactions(
     if transaction_type is not None:
         stmt = stmt.where(Transaction.transaction_type == transaction_type)
         count_stmt = count_stmt.where(Transaction.transaction_type == transaction_type)
+    if payment_method is not None:
+        method_filter = exists().where(
+            Payment.transaction_id == Transaction.id,
+            Payment.payment_method == payment_method,
+        )
+        stmt = stmt.where(method_filter)
+        count_stmt = count_stmt.where(method_filter)
     if q and q.strip():
         pattern = f"%{q.strip()}%"
         filt = or_(

@@ -10,10 +10,33 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { clientApi, toastError } from "@/lib/client-api";
-import type { Paginated, ReportSummary, Transaction } from "@/lib/types";
+import type {
+  Paginated,
+  PaymentMethod,
+  ReportSummary,
+  Transaction,
+} from "@/lib/types";
 import { formatPeso } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+type PaymentFilter = "ALL" | PaymentMethod;
+
+const PAYMENT_FILTERS: { value: PaymentFilter; label: string }[] = [
+  { value: "ALL", label: "All payments" },
+  { value: "CASH", label: "Cash only" },
+  { value: "GCASH", label: "GCash only" },
+  { value: "BANK_TRANSFER", label: "Bank transfer" },
+  { value: "CARD", label: "Card" },
+  { value: "OTHER", label: "Other" },
+];
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -39,6 +62,10 @@ function fileSafeName(name: string) {
   );
 }
 
+function paymentFilterLabel(value: PaymentFilter) {
+  return PAYMENT_FILTERS.find((item) => item.value === value)?.label ?? value;
+}
+
 function formatPaidAt(value: string | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleString("en-PH", {
@@ -57,27 +84,57 @@ function isInRange(value: string | null | undefined, start: string, end: string)
   return local >= start && local <= end;
 }
 
+function paymentMethodsLabel(sale: Transaction) {
+  const methods = Array.from(
+    new Set((sale.payments ?? []).map((p) => p.payment_method)),
+  );
+  if (!methods.length) return "Paid";
+  return methods
+    .map((method) =>
+      method === "BANK_TRANSFER"
+        ? "Bank"
+        : method === "GCASH"
+          ? "GCash"
+          : method.charAt(0) + method.slice(1).toLowerCase(),
+    )
+    .join(" + ");
+}
+
 export default function DirectSalesPage() {
   const { activeBranch, user } = useBranch();
   const { settings } = useShop();
   const isAdmin = user?.role === "ADMIN";
   const [start, setStart] = useState(todayISO());
   const [end, setEnd] = useState(todayISO());
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>("ALL");
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [sales, setSales] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
 
   const load = useCallback(
-    async (s = start, e = end) => {
+    async (s = start, e = end, method: PaymentFilter = paymentFilter) => {
       setLoading(true);
       try {
+        const reportParams = new URLSearchParams({
+          start_date: s,
+          end_date: e,
+          transaction_type: "DIRECT_SALE",
+        });
+        const listParams = new URLSearchParams({
+          transaction_type: "DIRECT_SALE",
+          status: "PAID",
+          page_size: "100",
+        });
+        if (method !== "ALL") {
+          reportParams.set("payment_method", method);
+          listParams.set("payment_method", method);
+        }
+
         const [report, list] = await Promise.all([
-          clientApi<ReportSummary>(
-            `/reports/summary?start_date=${s}&end_date=${e}&transaction_type=DIRECT_SALE`,
-          ),
+          clientApi<ReportSummary>(`/reports/summary?${reportParams}`),
           clientApi<Paginated<Transaction>>(
-            "/transactions?transaction_type=DIRECT_SALE&status=PAID&page_size=100",
+            `/transactions?${listParams.toString()}`,
           ),
         ]);
         setSummary(report);
@@ -96,7 +153,7 @@ export default function DirectSalesPage() {
         setLoading(false);
       }
     },
-    [start, end],
+    [start, end, paymentFilter],
   );
 
   useEffect(() => {
@@ -111,13 +168,15 @@ export default function DirectSalesPage() {
     const e = endDate.toISOString().slice(0, 10);
     setStart(s);
     setEnd(e);
-    void load(s, e);
+    void load(s, e, paymentFilter);
   }
 
   function exportPdf() {
     if (!summary) return;
     const previous = document.title;
-    document.title = `${fileSafeName(settings.business_name)}-DirectSales-${start}_to_${end}`;
+    const methodSuffix =
+      paymentFilter === "ALL" ? "All" : paymentFilter.replace("_", "-");
+    document.title = `${fileSafeName(settings.business_name)}-DirectSales-${start}_to_${end}-${methodSuffix}`;
     window.print();
     document.title = previous;
   }
@@ -192,29 +251,59 @@ export default function DirectSalesPage() {
         </Button>
       </div>
 
-      <div className="no-print flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="space-y-2">
+      <div className="no-print grid gap-3 sm:grid-cols-[145px_145px_180px_max-content] sm:items-end">
+        <div className="grid gap-2">
           <Label>Start</Label>
           <Input
             type="date"
-            className="min-h-11"
+            className="h-11"
             value={start}
             onChange={(e) => setStart(e.target.value)}
           />
         </div>
-        <div className="space-y-2">
+        <div className="grid gap-2">
           <Label>End</Label>
           <Input
             type="date"
-            className="min-h-11"
+            className="h-11"
             value={end}
             onChange={(e) => setEnd(e.target.value)}
           />
         </div>
-        <Button className="min-h-11" onClick={() => load()} disabled={loading}>
+        <div className="grid gap-2">
+          <Label>Payment</Label>
+          <Select
+            value={paymentFilter}
+            onValueChange={(value) => {
+              if (!value) return;
+              const next = value as PaymentFilter;
+              setPaymentFilter(next);
+              void load(start, end, next);
+            }}
+          >
+            <SelectTrigger className="h-11 w-full">
+              <SelectValue>{paymentFilterLabel(paymentFilter)}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {PAYMENT_FILTERS.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button className="h-11 sm:self-end" onClick={() => load()} disabled={loading}>
           Apply
         </Button>
       </div>
+
+      <p className="no-print text-sm text-muted-foreground">
+        Showing: {paymentFilterLabel(paymentFilter)}
+        {paymentFilter !== "ALL"
+          ? " (tickets that include this payment method)"
+          : ""}
+      </p>
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div className="rounded-xl border bg-card px-3 py-3">
@@ -416,7 +505,7 @@ export default function DirectSalesPage() {
                         {formatPeso(sale.totals?.net_total ?? 0)}
                       </span>
                       <Badge variant="outline" className="mt-1">
-                        Paid
+                        {paymentMethodsLabel(sale)}
                       </Badge>
                     </span>
                   </Link>
@@ -443,6 +532,8 @@ export default function DirectSalesPage() {
           Branch: {activeBranch?.name ?? "—"} ({activeBranch?.code ?? "—"})
           <br />
           Period: {formatRangeLabel(start, end)}
+          <br />
+          Payment: {paymentFilterLabel(paymentFilter)}
           <br />
           Generated: {new Date().toLocaleString("en-PH")}
         </p>
