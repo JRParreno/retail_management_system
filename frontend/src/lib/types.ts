@@ -239,6 +239,7 @@ export type ReportSummary = {
   low_stock_count: number;
   transaction_count: number;
   mechanic_commissions: MechanicCommissionRow[];
+  product_sales: ProductSalesRow[];
 };
 
 export type RefundablePartLine = {
@@ -323,6 +324,18 @@ export type MechanicCommissionRow = {
   commission_total: string;
   line_count: number;
   is_first_mechanic_waived: boolean;
+};
+
+export type ProductSalesRow = {
+  product_id: string;
+  product_name: string;
+  barcode: string;
+  brand: string | null;
+  quantity_sold: number;
+  sales_total: string;
+  cogs_total: string;
+  profit: string;
+  line_count: number;
 };
 
 export type MechanicCommissionComputation = {

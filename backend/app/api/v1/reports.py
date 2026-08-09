@@ -9,12 +9,12 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
 from app.models.branch import BranchStock
-from app.models.enums import Role, TransactionStatus
+from app.models.enums import Role, TransactionStatus, TransactionType
 from app.models.mechanic import Mechanic
 from app.models.product import Product
 from app.models.transaction import Transaction
 from app.models.user import User
-from app.schemas.report import MechanicCommissionRow, ReportSummary
+from app.schemas.report import MechanicCommissionRow, ProductSalesRow, ReportSummary
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -25,6 +25,7 @@ ZERO = Decimal("0.00")
 def report_summary(
     start_date: date = Query(...),
     end_date: date = Query(...),
+    transaction_type: TransactionType | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
     active_branch_id: UUID = Depends(get_active_branch_id),
@@ -32,16 +33,20 @@ def report_summary(
     start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
     end_dt = datetime.combine(end_date, time.max, tzinfo=timezone.utc)
 
+    filters = [
+        Transaction.status == TransactionStatus.PAID,
+        Transaction.branch_id == active_branch_id,
+        Transaction.paid_at.is_not(None),
+        Transaction.paid_at >= start_dt,
+        Transaction.paid_at <= end_dt,
+    ]
+    if transaction_type is not None:
+        filters.append(Transaction.transaction_type == transaction_type)
+
     transactions = list(
         db.scalars(
             select(Transaction)
-            .where(
-                Transaction.status == TransactionStatus.PAID,
-                Transaction.branch_id == active_branch_id,
-                Transaction.paid_at.is_not(None),
-                Transaction.paid_at >= start_dt,
-                Transaction.paid_at <= end_dt,
-            )
+            .where(*filters)
             .options(
                 selectinload(Transaction.part_lines),
                 selectinload(Transaction.labor_lines),
@@ -57,13 +62,29 @@ def report_summary(
     commission_waived_total = ZERO
     ticket_count = len(transactions)
     mechanic_totals: dict[UUID, dict[str, Decimal | int | bool]] = {}
+    product_totals: dict[UUID, dict[str, Decimal | int]] = {}
 
     # Historical integrity: use line snapshots only — never Product.current_*
     # or BranchPrice. Changing catalog/branch prices must not rewrite past tickets.
     for txn in transactions:
         for line in txn.part_lines:
-            parts_sales += line.actual_selling_price * line.quantity
-            cogs += line.cost_price_snapshot * line.quantity
+            line_sales = line.actual_selling_price * line.quantity
+            line_cogs = line.cost_price_snapshot * line.quantity
+            parts_sales += line_sales
+            cogs += line_cogs
+            bucket = product_totals.setdefault(
+                line.product_id,
+                {
+                    "quantity_sold": 0,
+                    "sales_total": ZERO,
+                    "cogs_total": ZERO,
+                    "line_count": 0,
+                },
+            )
+            bucket["quantity_sold"] = int(bucket["quantity_sold"]) + line.quantity
+            bucket["sales_total"] += line_sales
+            bucket["cogs_total"] += line_cogs
+            bucket["line_count"] = int(bucket["line_count"]) + 1
         for line in txn.labor_lines:
             labor_sales += line.actual_price
             gross = (
@@ -153,6 +174,36 @@ def report_summary(
             )
         mechanic_commissions.sort(key=lambda row: row.commission_total, reverse=True)
 
+    product_sales: list[ProductSalesRow] = []
+    if product_totals:
+        products = {
+            p.id: p
+            for p in db.scalars(
+                select(Product).where(Product.id.in_(product_totals.keys()))
+            ).all()
+        }
+        for product_id, totals in product_totals.items():
+            product = products.get(product_id)
+            sales_total = totals["sales_total"]  # type: ignore[assignment]
+            cogs_total = totals["cogs_total"]  # type: ignore[assignment]
+            product_sales.append(
+                ProductSalesRow(
+                    product_id=product_id,
+                    product_name=product.name if product else "Unknown product",
+                    barcode=product.barcode if product else "—",
+                    brand=product.brand if product else None,
+                    quantity_sold=int(totals["quantity_sold"]),
+                    sales_total=sales_total,
+                    cogs_total=cogs_total,
+                    profit=sales_total - cogs_total,
+                    line_count=int(totals["line_count"]),
+                )
+            )
+        product_sales.sort(
+            key=lambda row: (row.quantity_sold, row.sales_total),
+            reverse=True,
+        )
+
     return ReportSummary(
         gross_revenue=gross_revenue,
         cogs=cogs,
@@ -169,4 +220,5 @@ def report_summary(
         net_profit=net_profit,
         transaction_count=ticket_count,
         mechanic_commissions=mechanic_commissions,
+        product_sales=product_sales,
     )

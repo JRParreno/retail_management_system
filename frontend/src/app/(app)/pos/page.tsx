@@ -334,6 +334,8 @@ export default function PosPage() {
             }),
           });
           setCart([]);
+          setQ("");
+          setBarcodeQuery("");
         }}
       />
     </div>

@@ -264,6 +264,97 @@ export default function ReportsPage() {
                 </div>
               </div>
             ) : null}
+
+            <div>
+              <h2 className="mb-2 text-lg font-semibold">Product sales</h2>
+              <p className="mb-2 text-sm text-muted-foreground">
+                All parts sold in this period (direct sales + service jobs)
+              </p>
+              {summary.product_sales?.length ? (
+                <div className="overflow-x-auto rounded-xl border bg-card">
+                  <table className="w-full min-w-[720px] text-left text-sm">
+                    <thead className="border-b bg-muted/40">
+                      <tr>
+                        <th className="px-3 py-3">Product</th>
+                        <th className="px-3 py-3">Barcode</th>
+                        <th className="px-3 py-3 text-right">Qty</th>
+                        <th className="px-3 py-3 text-right">Sales</th>
+                        {isAdmin ? (
+                          <>
+                            <th className="px-3 py-3 text-right">COGS</th>
+                            <th className="px-3 py-3 text-right">Profit</th>
+                          </>
+                        ) : null}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.product_sales.map((row) => (
+                        <tr key={row.product_id} className="border-b last:border-0">
+                          <td className="px-3 py-3">
+                            <p className="font-medium">{row.product_name}</p>
+                            {row.brand ? (
+                              <p className="text-xs text-muted-foreground">
+                                {row.brand}
+                              </p>
+                            ) : null}
+                          </td>
+                          <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
+                            {row.barcode}
+                          </td>
+                          <td className="px-3 py-3 text-right tabular-nums font-medium">
+                            {row.quantity_sold}
+                          </td>
+                          <td className="px-3 py-3 text-right tabular-nums">
+                            {formatPeso(row.sales_total)}
+                          </td>
+                          {isAdmin ? (
+                            <>
+                              <td className="px-3 py-3 text-right tabular-nums">
+                                {formatPeso(row.cogs_total)}
+                              </td>
+                              <td className="px-3 py-3 text-right tabular-nums font-medium">
+                                {formatPeso(row.profit)}
+                              </td>
+                            </>
+                          ) : null}
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="border-t bg-muted/30 font-medium">
+                      <tr>
+                        <td className="px-3 py-3" colSpan={2}>
+                          Total ({summary.product_sales.length} SKU
+                          {summary.product_sales.length === 1 ? "" : "s"})
+                        </td>
+                        <td className="px-3 py-3 text-right tabular-nums">
+                          {summary.product_sales.reduce(
+                            (sum, row) => sum + row.quantity_sold,
+                            0,
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-right tabular-nums">
+                          {formatPeso(summary.parts_sales)}
+                        </td>
+                        {isAdmin ? (
+                          <>
+                            <td className="px-3 py-3 text-right tabular-nums">
+                              {formatPeso(summary.cogs)}
+                            </td>
+                            <td className="px-3 py-3 text-right tabular-nums">
+                              {formatPeso(summary.parts_profit)}
+                            </td>
+                          </>
+                        ) : null}
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                <p className="rounded-xl border bg-card px-4 py-6 text-sm text-muted-foreground">
+                  No product sales in this period.
+                </p>
+              )}
+            </div>
           </div>
 
           <div className="report-print-area report-print-only">
@@ -354,6 +445,66 @@ export default function ReportsPage() {
                 </table>
               </>
             ) : null}
+            <h2 style={{ fontSize: "13pt", margin: "14pt 0 6pt" }}>
+              Product sales
+            </h2>
+            {summary.product_sales?.length ? (
+              <table className="report-print-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Barcode</th>
+                    <th>Qty</th>
+                    <th>Sales</th>
+                    {isAdmin ? (
+                      <>
+                        <th>COGS</th>
+                        <th>Profit</th>
+                      </>
+                    ) : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.product_sales.map((row) => (
+                    <tr key={row.product_id}>
+                      <td>
+                        {row.product_name}
+                        {row.brand ? ` (${row.brand})` : ""}
+                      </td>
+                      <td>{row.barcode}</td>
+                      <td>{row.quantity_sold}</td>
+                      <td>{formatPeso(row.sales_total)}</td>
+                      {isAdmin ? (
+                        <>
+                          <td>{formatPeso(row.cogs_total)}</td>
+                          <td>{formatPeso(row.profit)}</td>
+                        </>
+                      ) : null}
+                    </tr>
+                  ))}
+                  <tr>
+                    <td colSpan={2}>
+                      Total ({summary.product_sales.length} SKUs)
+                    </td>
+                    <td>
+                      {summary.product_sales.reduce(
+                        (sum, row) => sum + row.quantity_sold,
+                        0,
+                      )}
+                    </td>
+                    <td>{formatPeso(summary.parts_sales)}</td>
+                    {isAdmin ? (
+                      <>
+                        <td>{formatPeso(summary.cogs)}</td>
+                        <td>{formatPeso(summary.parts_profit)}</td>
+                      </>
+                    ) : null}
+                  </tr>
+                </tbody>
+              </table>
+            ) : (
+              <p>No product sales in this period.</p>
+            )}
           </div>
         </>
       ) : null}

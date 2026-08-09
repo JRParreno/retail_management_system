@@ -77,6 +77,11 @@ export function ShopProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    const name = settings.business_name.trim() || DEFAULT_SHOP_SETTINGS.business_name;
+    document.title = name;
+  }, [settings.business_name]);
+
   const value = useMemo(
     () => ({ settings, loading, refresh, applyLocal }),
     [settings, loading, refresh, applyLocal],

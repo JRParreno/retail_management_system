@@ -15,6 +15,18 @@ class MechanicCommissionRow(BaseModel):
     is_first_mechanic_waived: bool = False
 
 
+class ProductSalesRow(BaseModel):
+    product_id: UUID
+    product_name: str
+    barcode: str
+    brand: str | None = None
+    quantity_sold: int
+    sales_total: Decimal
+    cogs_total: Decimal
+    profit: Decimal
+    line_count: int = 0
+
+
 class ReportSummary(BaseModel):
     gross_revenue: Decimal
     cogs: Decimal
@@ -31,3 +43,4 @@ class ReportSummary(BaseModel):
     net_profit: Decimal
     transaction_count: int
     mechanic_commissions: list[MechanicCommissionRow] = Field(default_factory=list)
+    product_sales: list[ProductSalesRow] = Field(default_factory=list)

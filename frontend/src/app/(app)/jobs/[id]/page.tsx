@@ -488,6 +488,7 @@ export default function JobDetailPage() {
     return <p className="text-sm text-muted-foreground">Loading job…</p>;
   }
 
+  const isDirectSale = tx.transaction_type === "DIRECT_SALE";
   const balance = Number(tx.totals?.balance_due ?? 0);
 
   return (
@@ -496,19 +497,36 @@ export default function JobDetailPage() {
         <div>
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">
-              {tx.plate_number?.trim() || tx.motorcycle_model || "Service job"}
+              {isDirectSale
+                ? "Direct sale"
+                : tx.plate_number?.trim() ||
+                  tx.motorcycle_model ||
+                  "Service job"}
             </h1>
             <Badge>{tx.status}</Badge>
             <Badge variant="secondary">{tx.document_number}</Badge>
+            {isDirectSale ? (
+              <Badge variant="outline">Counter checkout</Badge>
+            ) : null}
           </div>
           <p className="text-sm text-muted-foreground">
-            {[tx.customer_name, tx.customer_phone, tx.motorcycle_model]
-              .filter((v) => v && String(v).trim())
-              .join(" · ")}
+            {isDirectSale
+              ? "Parts-only sale — no labor"
+              : [tx.customer_name, tx.customer_phone, tx.motorcycle_model]
+                  .filter((v) => v && String(v).trim())
+                  .join(" · ")}
           </p>
+          {isDirectSale ? (
+            <Link
+              href="/direct-sales"
+              className="mt-1 inline-block text-xs text-muted-foreground underline"
+            >
+              Back to sale history
+            </Link>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
-          {tx.status === "DONE" || tx.status === "PAID" ? (
+          {!isDirectSale && (tx.status === "DONE" || tx.status === "PAID") ? (
             <Button
               type="button"
               variant="outline"
@@ -519,12 +537,12 @@ export default function JobDetailPage() {
               Print completed job
             </Button>
           ) : null}
-          {tx.status === "IN_PROGRESS" ? (
+          {!isDirectSale && tx.status === "IN_PROGRESS" ? (
             <Button className="min-h-11" onClick={() => setStatus("DONE")}>
               Mark DONE
             </Button>
           ) : null}
-          {tx.status === "DONE" ? (
+          {!isDirectSale && tx.status === "DONE" ? (
             <>
               <Button
                 variant="outline"
@@ -542,7 +560,7 @@ export default function JobDetailPage() {
               ) : null}
             </>
           ) : null}
-          {tx.status === "IN_PROGRESS" && balance > 0 ? (
+          {!isDirectSale && tx.status === "IN_PROGRESS" && balance > 0 ? (
             <Button
               variant="secondary"
               className="min-h-11"
@@ -553,7 +571,8 @@ export default function JobDetailPage() {
                 : "Collect deposit"}
             </Button>
           ) : null}
-          {tx.status === "IN_PROGRESS" || tx.status === "DONE" ? (
+          {!isDirectSale &&
+          (tx.status === "IN_PROGRESS" || tx.status === "DONE") ? (
             <Button
               variant="destructive"
               className="min-h-11"
@@ -575,7 +594,7 @@ export default function JobDetailPage() {
 
       <div className="space-y-4">
         <div className="grid gap-4 lg:grid-cols-2">
-          {tx.status === "IN_PROGRESS" ? (
+          {tx.status === "IN_PROGRESS" && !isDirectSale ? (
             <section className="rounded-xl border bg-card p-4">
               <h2 className="mb-3 font-semibold">Add part</h2>
               <div className="space-y-2">
@@ -754,7 +773,7 @@ export default function JobDetailPage() {
             </section>
           ) : null}
 
-          {tx.status === "IN_PROGRESS" ? (
+          {tx.status === "IN_PROGRESS" && !isDirectSale ? (
             <section className="rounded-xl border bg-card p-4">
               <h2 className="mb-3 font-semibold">Add labor</h2>
               <div className="space-y-2">
@@ -796,15 +815,19 @@ export default function JobDetailPage() {
           ) : null}
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-2">
+        <div className={cn("grid gap-4", !isDirectSale && "xl:grid-cols-2")}>
           <section className="rounded-xl border bg-card p-4">
-            <h2 className="mb-3 font-semibold">Parts</h2>
+            <h2 className="mb-3 font-semibold">
+              {isDirectSale ? "Products purchased" : "Parts"}
+            </h2>
             <ul className="space-y-2 text-sm">
               {tx.part_lines.map((line) => {
                 const product = products.find((p) => p.id === line.product_id);
                 const canRemove =
-                  tx.status === "IN_PROGRESS" || tx.status === "DONE";
-                const canAddLabor = tx.status === "IN_PROGRESS";
+                  !isDirectSale &&
+                  (tx.status === "IN_PROGRESS" || tx.status === "DONE");
+                const canAddLabor =
+                  !isDirectSale && tx.status === "IN_PROGRESS";
                 return (
                   <li
                     key={line.id}
@@ -873,13 +896,14 @@ export default function JobDetailPage() {
               ) : null}
             </ul>
             <p className="mt-3 flex justify-between border-t pt-3 text-sm font-medium">
-              <span>Parts subtotal</span>
+              <span>{isDirectSale ? "Subtotal" : "Parts subtotal"}</span>
               <span className="tabular-nums">
                 {formatPeso(tx.totals?.parts_total)}
               </span>
             </p>
           </section>
 
+          {!isDirectSale ? (
           <section className="rounded-xl border bg-card p-4">
             <h2 className="mb-3 font-semibold">Labor</h2>
             <ul className="space-y-2 text-sm">
@@ -952,16 +976,16 @@ export default function JobDetailPage() {
               </span>
             </p>
           </section>
+          ) : null}
         </div>
       </div>
 
       <section className="rounded-xl border bg-card p-4">
         <h2 className="mb-3 font-semibold">Totals</h2>
         <p className="mb-3 text-xs text-muted-foreground">
-          Partial payments are allowed — paid amount builds until balance due is
-          ₱0.00, then the job becomes PAID. For a quote that is not saved as a
-          job, use <strong>Estimate</strong> in the sidebar. Marking DONE prints
-          a completion sheet automatically.
+          {isDirectSale
+            ? "This is a completed counter checkout. Use Refund if the customer returns items."
+            : "Partial payments are allowed — paid amount builds until balance due is ₱0.00, then the job becomes PAID. For a quote that is not saved as a job, use Estimate in the sidebar. Marking DONE prints a completion sheet automatically."}
         </p>
         <div className="space-y-1 text-sm">
           <p className="flex justify-between">

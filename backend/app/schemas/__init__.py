@@ -29,7 +29,7 @@ from app.schemas.product import (
     ProductRead,
     ProductUpdate,
 )
-from app.schemas.report import MechanicCommissionRow, ReportSummary
+from app.schemas.report import MechanicCommissionRow, ProductSalesRow, ReportSummary
 from app.schemas.return_void import (
     DocumentNumberSequenceRead,
     RefundableSnapshot,
@@ -109,6 +109,7 @@ __all__ = [
     "RefundableSnapshot",
     "ReportSummary",
     "MechanicCommissionRow",
+    "ProductSalesRow",
     "MechanicProfileLaborLine",
     "MechanicProfileRead",
     "BranchCreate",

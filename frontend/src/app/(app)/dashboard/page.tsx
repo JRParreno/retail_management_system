@@ -35,6 +35,17 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function isSameLocalDay(value: string | null | undefined, dayISO: string) {
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  const local = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const y = local.getFullYear();
+  const m = String(local.getMonth() + 1).padStart(2, "0");
+  const day = String(local.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}` === dayISO;
+}
+
 function statusLabel(status: TransactionStatus) {
   if (status === "DONE") return "Awaiting pay";
   if (status === "IN_PROGRESS") return "In progress";
@@ -68,6 +79,7 @@ const SECONDARY_ACTIONS: {
 }[] = [
   { href: "/estimates", label: "Estimate", icon: Calculator },
   { href: "/jobs", label: "Job board", icon: ClipboardList },
+  { href: "/direct-sales", label: "Sale history", icon: ShoppingCart },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/refunds", label: "Refunds", icon: RotateCcw },
   { href: "/mechanics", label: "Mechanics", icon: Wrench, adminOnly: true },
@@ -81,6 +93,7 @@ export default function DashboardPage() {
   const isAdmin = user?.role === "ADMIN";
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [activeJobs, setActiveJobs] = useState<Transaction[]>([]);
+  const [directSalesToday, setDirectSalesToday] = useState<Transaction[]>([]);
   const [inProgressCount, setInProgressCount] = useState(0);
   const [awaitingPayCount, setAwaitingPayCount] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
@@ -91,7 +104,7 @@ export default function DashboardPage() {
     setLoading(true);
     const today = todayISO();
     try {
-      const [report, inProgress, awaitingPay, products, currentShift] =
+      const [report, inProgress, awaitingPay, directSales, products, currentShift] =
         await Promise.all([
           clientApi<ReportSummary>(
             `/reports/summary?start_date=${today}&end_date=${today}`,
@@ -101,6 +114,9 @@ export default function DashboardPage() {
           ),
           clientApi<Paginated<Transaction>>(
             "/transactions?transaction_type=SERVICE_JOB&status=DONE&page_size=50",
+          ),
+          clientApi<Paginated<Transaction>>(
+            "/transactions?transaction_type=DIRECT_SALE&status=PAID&page_size=50",
           ),
           clientApi<Paginated<Product>>("/products?page_size=100"),
           clientApi<CashierShift | null>("/shifts/current").catch(() => null),
@@ -115,6 +131,17 @@ export default function DashboardPage() {
           const bx = b.started_at ?? b.created_at;
           return bx.localeCompare(ax);
         }),
+      );
+      setDirectSalesToday(
+        directSales.items
+          .filter((sale) =>
+            isSameLocalDay(sale.paid_at ?? sale.created_at, today),
+          )
+          .sort((a, b) => {
+            const ax = a.paid_at ?? a.created_at;
+            const bx = b.paid_at ?? b.created_at;
+            return bx.localeCompare(ax);
+          }),
       );
       setLowStockItems(
         products.items
@@ -147,6 +174,18 @@ export default function DashboardPage() {
   }
 
   const queuePreview = useMemo(() => activeJobs.slice(0, 8), [activeJobs]);
+  const directSalesPreview = useMemo(
+    () => directSalesToday.slice(0, 8),
+    [directSalesToday],
+  );
+  const directSalesTotal = useMemo(
+    () =>
+      directSalesToday.reduce(
+        (sum, sale) => sum + Number(sale.totals?.net_total ?? 0),
+        0,
+      ),
+    [directSalesToday],
+  );
   const shiftOpen = shift?.status === "OPEN";
   const lowStockCount = summary?.low_stock_count ?? lowStockItems.length;
   const openJobCount = inProgressCount + awaitingPayCount;
@@ -241,7 +280,7 @@ export default function DashboardPage() {
         </Link>
       </section>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
         <Link
           href="/jobs?status=IN_PROGRESS"
           className="rounded-xl border bg-card px-3 py-3 transition-colors hover:border-primary/40"
@@ -258,6 +297,18 @@ export default function DashboardPage() {
           <p className="text-xs text-muted-foreground">Awaiting pay</p>
           <p className="mt-1 text-2xl font-semibold tabular-nums">
             {loading ? "—" : awaitingPayCount}
+          </p>
+        </Link>
+        <Link
+          href="/direct-sales"
+          className="rounded-xl border bg-card px-3 py-3 transition-colors hover:border-primary/40"
+        >
+          <p className="text-xs text-muted-foreground">Direct sales</p>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">
+            {loading ? "—" : directSalesToday.length}
+          </p>
+          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+            {loading ? "—" : formatPeso(directSalesTotal)} today
           </p>
         </Link>
         <Link
@@ -316,72 +367,157 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
-        <section className="rounded-xl border bg-card">
-          <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
-            <div>
-              <h2 className="font-semibold">Open jobs</h2>
-              <p className="text-xs text-muted-foreground">
-                Tap a job to open it
-              </p>
+        <div className="space-y-4">
+          <section className="rounded-xl border bg-card">
+            <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+              <div>
+                <h2 className="font-semibold">Open jobs</h2>
+                <p className="text-xs text-muted-foreground">
+                  Tap a job to open it
+                </p>
+              </div>
+              <Link
+                href="/jobs?status=OPEN"
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "sm" }),
+                  "min-h-9",
+                )}
+              >
+                View all
+              </Link>
             </div>
-            <Link
-              href="/jobs?status=OPEN"
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "sm" }),
-                "min-h-9",
-              )}
-            >
-              View all
-            </Link>
-          </div>
 
-          <ul className="divide-y">
-            {queuePreview.map((job) => (
-              <li key={job.id}>
-                <button
-                  type="button"
-                  className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
-                  onClick={() => router.push(`/jobs/${job.id}`)}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-semibold">
-                      {job.plate_number?.trim() ||
-                        job.motorcycle_model ||
-                        "No plate"}
-                    </span>
-                    <span className="block truncate text-sm text-muted-foreground">
-                      {job.customer_name || "Walk-in"} · {job.document_number}
-                    </span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {formatStarted(job.started_at ?? job.created_at)}
-                    </span>
-                  </span>
-                  <Badge
-                    variant={statusBadgeVariant(job.status)}
-                    className="shrink-0"
+            <ul className="divide-y">
+              {queuePreview.map((job) => (
+                <li key={job.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                    onClick={() => router.push(`/jobs/${job.id}`)}
                   >
-                    {statusLabel(job.status)}
-                  </Badge>
-                </button>
-              </li>
-            ))}
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">
+                        {job.plate_number?.trim() ||
+                          job.motorcycle_model ||
+                          "No plate"}
+                      </span>
+                      <span className="block truncate text-sm text-muted-foreground">
+                        {job.customer_name || "Walk-in"} · {job.document_number}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        {formatStarted(job.started_at ?? job.created_at)}
+                      </span>
+                    </span>
+                    <Badge
+                      variant={statusBadgeVariant(job.status)}
+                      className="shrink-0"
+                    >
+                      {statusLabel(job.status)}
+                    </Badge>
+                  </button>
+                </li>
+              ))}
 
-            {!loading && !queuePreview.length ? (
-              <li className="px-4 py-8 text-sm text-muted-foreground">
-                No open jobs.{" "}
-                <Link href="/jobs/new" className="font-medium text-primary underline">
-                  Start a new job
-                </Link>
-              </li>
-            ) : null}
+              {!loading && !queuePreview.length ? (
+                <li className="px-4 py-8 text-sm text-muted-foreground">
+                  No open jobs.{" "}
+                  <Link
+                    href="/jobs/new"
+                    className="font-medium text-primary underline"
+                  >
+                    Start a new job
+                  </Link>
+                </li>
+              ) : null}
 
-            {loading ? (
-              <li className="px-4 py-8 text-sm text-muted-foreground">
-                Loading jobs…
-              </li>
-            ) : null}
-          </ul>
-        </section>
+              {loading ? (
+                <li className="px-4 py-8 text-sm text-muted-foreground">
+                  Loading jobs…
+                </li>
+              ) : null}
+            </ul>
+          </section>
+
+          <section className="rounded-xl border bg-card">
+            <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+              <div>
+                <h2 className="font-semibold">Direct sales today</h2>
+                <p className="text-xs text-muted-foreground">
+                  Counter checkouts ·{" "}
+                  {loading ? "—" : formatPeso(directSalesTotal)}
+                </p>
+              </div>
+              <Link
+                href="/direct-sales"
+                className={cn(
+                  buttonVariants({ variant: "ghost", size: "sm" }),
+                  "min-h-9",
+                )}
+              >
+                View all
+              </Link>
+            </div>
+
+            <ul className="divide-y">
+              {directSalesPreview.map((sale) => {
+                const itemCount = sale.part_lines.reduce(
+                  (sum, line) => sum + line.quantity,
+                  0,
+                );
+                return (
+                  <li key={sale.id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                      onClick={() => router.push(`/jobs/${sale.id}`)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-semibold">
+                          {sale.document_number}
+                        </span>
+                        <span className="block truncate text-sm text-muted-foreground">
+                          {itemCount} item{itemCount === 1 ? "" : "s"}
+                          {sale.customer_name
+                            ? ` · ${sale.customer_name}`
+                            : ""}
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {formatStarted(sale.paid_at ?? sale.created_at)}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-right">
+                        <span className="block tabular-nums font-semibold">
+                          {formatPeso(sale.totals?.net_total ?? 0)}
+                        </span>
+                        <Badge variant="outline" className="mt-1">
+                          Paid
+                        </Badge>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+
+              {!loading && !directSalesPreview.length ? (
+                <li className="px-4 py-8 text-sm text-muted-foreground">
+                  No direct sales yet today.{" "}
+                  <Link
+                    href="/pos"
+                    className="font-medium text-primary underline"
+                  >
+                    Open counter checkout
+                  </Link>
+                </li>
+              ) : null}
+
+              {loading ? (
+                <li className="px-4 py-8 text-sm text-muted-foreground">
+                  Loading sales…
+                </li>
+              ) : null}
+            </ul>
+          </section>
+        </div>
 
         <div className="space-y-4">
           {isAdmin ? (
@@ -402,6 +538,14 @@ export default function DashboardPage() {
                     {loading || !summary
                       ? "—"
                       : formatPeso(summary.gross_revenue)}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">Direct sales</dt>
+                  <dd className="tabular-nums font-medium">
+                    {loading
+                      ? "—"
+                      : `${directSalesToday.length} · ${formatPeso(directSalesTotal)}`}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">

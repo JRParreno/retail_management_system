@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, noload, selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
@@ -191,7 +191,7 @@ def _mark_paid_if_covered(
         transaction.completed_at = transaction.paid_at
 
 
-@router.get("", response_model=PaginatedResponse[TransactionRead])
+@router.get("", response_model=PaginatedResponse[TransactionDetailRead])
 def list_transactions(
     status_filter: TransactionStatus | None = Query(default=None, alias="status"),
     transaction_type: TransactionType | None = Query(default=None),
@@ -201,11 +201,11 @@ def list_transactions(
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
     active_branch_id: UUID = Depends(get_active_branch_id),
-) -> PaginatedResponse[TransactionRead]:
+) -> PaginatedResponse[TransactionDetailRead]:
     stmt = select(Transaction).where(Transaction.branch_id == active_branch_id).options(
-        noload(Transaction.part_lines),
-        noload(Transaction.labor_lines),
-        noload(Transaction.payments),
+        selectinload(Transaction.part_lines),
+        selectinload(Transaction.labor_lines),
+        selectinload(Transaction.payments),
     )
     count_stmt = (
         select(func.count())
@@ -238,7 +238,7 @@ def list_transactions(
         ).all()
     )
     return PaginatedResponse(
-        items=items,
+        items=[_to_detail(item) for item in items],
         total=total,
         page=page,
         page_size=page_size,
