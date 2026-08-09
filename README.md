@@ -124,6 +124,22 @@ chmod +x run_prod_menu.sh
 ./run_prod_menu.sh 5
 ```
 
+### Database backups (recommended)
+
+One local Postgres + nightly dumps (no second live DB). Dumps go to `/opt/rms/backups` when that path exists, otherwise `./backups/`.
+
+```bash
+chmod +x run_db_backup.sh
+./run_db_backup.sh status
+./run_db_backup.sh backup
+./run_db_backup.sh install-cron                    # nightly 02:00
+./run_db_backup.sh install-cron --offsite /mnt/usb/rms-backups
+./run_db_backup.sh list
+./run_db_backup.sh restore latest                  # destructive; confirm with YES
+```
+
+Or from the production menu: option **13**. Keep 14 days by default; set `RMS_BACKUP_DIR` / `RMS_BACKUP_OFFSITE` if needed.
+
 ---
 
 ```bash

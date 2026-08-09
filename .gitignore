@@ -60,5 +60,6 @@ logs/
 *.pem
 
 # Docker volumes / local DB dumps
+backups/
 *.sql.gz
 *.dump

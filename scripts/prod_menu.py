@@ -9,6 +9,7 @@ Usage:
   ./run_prod_menu.sh
   python3 scripts/prod_menu.py
   python3 scripts/prod_menu.py 5    # jump to option 5
+  python3 scripts/prod_menu.py 13   # database backup submenu
 """
 
 from __future__ import annotations
@@ -766,6 +767,59 @@ def action_fix_service_user() -> None:
     action_status()
 
 
+def action_db_backup() -> None:
+    """Nightly dump / restore helpers for the single local Postgres."""
+    script = ROOT / "scripts" / "db_backup.py"
+    if not script.is_file():
+        raise SystemExit(f"Missing {script}")
+
+    print(
+        """
+=== Database backup (local Postgres) ===
+  Recommended: one primary DB + nightly dumps + optional offsite copy.
+  1) Status
+  2) Backup now
+  3) List dumps
+  4) Restore latest (destructive)
+  5) Install nightly cron (02:00)
+  6) Uninstall nightly cron
+  0) Back
+"""
+    )
+    try:
+        choice = input("Select: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+
+    mapping = {
+        "1": ["status"],
+        "2": ["backup"],
+        "3": ["list"],
+        "4": ["restore", "latest"],
+        "5": ["install-cron"],
+        "6": ["uninstall-cron"],
+    }
+    if choice in ("0", "q", "quit", "back"):
+        return
+    args = mapping.get(choice)
+    if not args:
+        print("Unknown option.")
+        return
+
+    if choice == "5":
+        offsite = input(
+            "Offsite copy directory (Enter to skip, e.g. /mnt/usb/rms-backups): "
+        ).strip()
+        cmd = [sys.executable, str(script), *args]
+        if offsite:
+            cmd.extend(["--offsite", offsite])
+        run(cmd, check=False)
+        return
+
+    run([sys.executable, str(script), *args], check=False)
+
+
 def menu_text() -> str:
     return """
 ╔══════════════════════════════════════════╗
@@ -783,6 +837,7 @@ def menu_text() -> str:
 ║ 10  Re-run Nginx setup (no domain)       ║
 ║ 11  Fix service user + Node path         ║
 ║ 12  Cloudflare Tunnel (public HTTPS)     ║
+║ 13  Database backup / restore            ║
 ║  0  Exit                                 ║
 ╚══════════════════════════════════════════╝
 """
@@ -801,6 +856,7 @@ ACTIONS = {
     "10": action_setup_nginx,
     "11": action_fix_service_user,
     "12": action_cloudflare_tunnel,
+    "13": action_db_backup,
 }
 
 

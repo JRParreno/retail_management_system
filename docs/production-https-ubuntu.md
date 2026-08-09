@@ -99,7 +99,7 @@ Replace every `rms.example.com` below with your real hostname.
 │   ├── cloudflare/
 │   ├── docker-compose.yml
 │   └── ...
-├── backups/                      # optional DB dumps
+├── backups/                      # DB dumps (./run_db_backup.sh)
 └── secrets/                      # optional; keep out of git
 
 /etc/nginx/sites-available/rms
@@ -108,6 +108,18 @@ Replace every `rms.example.com` below with your real hostname.
 /etc/systemd/system/rms-web.service
 /etc/cloudflared/config.yml       # CGNAT / Tunnel path only
 ```
+
+Nightly DB backup (recommended — single local Postgres, not a second live DB):
+
+```bash
+cd /opt/rms/retail_management_system
+chmod +x run_db_backup.sh
+./run_db_backup.sh backup
+./run_db_backup.sh install-cron --offsite /path/to/usb-or-nas/rms-backups
+# or: ./run_prod_menu.sh 13
+```
+
+Dumps land in `/opt/rms/backups/` (14-day retention). Copy offsite daily via `--offsite` or `RMS_BACKUP_OFFSITE`.
 
 Clone once:
 
@@ -925,7 +937,7 @@ curl -sI https://rms.example.com
 3. **Do not publish** ports 3000/8000/5432 to the WAN; only 80/443 (or neither, with Tunnel).
 4. **SSH:** key-only auth, optionally non-default port + `ufw`; consider `fail2ban`.
 5. **Automatic updates:** `sudo apt install unattended-upgrades` and enable.
-6. **Backups:** nightly `pg_dump` to `/opt/rms/backups/` and copy off-site.
+6. **Backups:** use `./run_db_backup.sh install-cron` (or prod menu option 13) for nightly `pg_dump` to `/opt/rms/backups/` and optional `--offsite` copy.
 7. **Least privilege:** run apps as `rms`, not root.
 8. **HSTS** only after HTTPS is stable (included in Nginx sample).
 9. **Cloudflare:** enable WAF managed rules if on a paid plan; always keep orange-cloud on the tunnel hostname.
