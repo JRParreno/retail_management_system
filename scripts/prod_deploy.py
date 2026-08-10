@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Production deploy / restart for MotoShop RMS.
+Production deploy / restart for MotoShop RMS (Windows + Linux).
 
 - Checks required tools
 - Starts Postgres (Docker)
@@ -15,7 +15,9 @@ Usage (from repo root):
   python scripts/prod_deploy.py --skip-build
   python scripts/prod_deploy.py --with-tunnel quick
   python scripts/prod_deploy.py --with-tunnel named
-  ./run_prod.sh
+  ./run_prod.sh            # Linux
+  .\\run_prod.ps1          # Windows PowerShell
+  .\\run_prod.bat          # Windows CMD
 """
 
 from __future__ import annotations
@@ -25,7 +27,6 @@ import os
 import re
 import secrets
 import shutil
-import signal
 import socket
 import subprocess
 import sys
@@ -38,6 +39,18 @@ BACKEND = ROOT / "backend"
 FRONTEND = ROOT / "frontend"
 CLOUDFLARE = ROOT / "cloudflare"
 LOGS = ROOT / "logs"
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from platform_util import (  # noqa: E402
+    cloudflared_candidates,
+    cloudflared_install_hint,
+    docker_install_hint,
+    pids_on_port,
+    start_detached as _start_detached,
+    stop_pid,
+    venv_install_hint,
+    venv_python,
+)
 
 BACKEND_PID = LOGS / "prod_backend.pid"
 FRONTEND_PID = LOGS / "prod_frontend.pid"
@@ -51,10 +64,7 @@ APP_PORT = 3000
 
 
 def py_exe() -> Path:
-    unix = BACKEND / ".venv" / "bin" / "python"
-    if unix.exists():
-        return unix
-    return BACKEND / ".venv" / "bin" / "python3"
+    return venv_python(BACKEND / ".venv")
 
 
 def ensure_backend_venv() -> None:
@@ -65,8 +75,7 @@ def ensure_backend_venv() -> None:
             venv.create(BACKEND / ".venv", with_pip=True)
         except Exception as exc:  # noqa: BLE001
             raise SystemExit(
-                f"Failed to create virtualenv: {exc}\n"
-                "Install: sudo apt install -y python3-venv python3-pip"
+                f"Failed to create virtualenv: {exc}\n{venv_install_hint()}"
             ) from exc
 
     python = py_exe()
@@ -90,14 +99,16 @@ def ensure_backend_venv() -> None:
 
 
 def npm_cmd() -> str:
+    path = shutil.which("npm")
+    if path:
+        return path
     return "npm"
 
 
 def docker_cmd() -> list[str]:
     if shutil.which("docker"):
         return ["docker", "compose"]
-    raise SystemExit("Docker not found. Install Docker Engine.")
-
+    raise SystemExit(f"Docker not found. {docker_install_hint()}")
 
 def run(
     cmd: list[str],
@@ -175,7 +186,7 @@ def check_requirements() -> None:
     if probe.returncode != 0:
         raise SystemExit(
             "Docker is installed but the daemon is not running. "
-            "Start Docker Desktop / dockerd, then retry."
+            f"Start Docker Desktop / dockerd, then retry.\n{docker_install_hint()}"
         )
     print("  Docker daemon: OK")
 
@@ -287,39 +298,6 @@ def build_frontend() -> None:
     run([npm_cmd(), "run", "build"], cwd=FRONTEND)
 
 
-def pids_on_port(port: int) -> list[int]:
-    pids: list[int] = []
-    for tool in (["lsof", f"-tiTCP:{port}", "-sTCP:LISTEN"], ["fuser", f"{port}/tcp"]):
-        if not shutil.which(tool[0]):
-            continue
-        probe = subprocess.run(tool, capture_output=True, text=True, check=False)
-        if probe.returncode != 0:
-            continue
-        for token in re.split(r"[\s,]+", probe.stdout.strip()):
-            if token.isdigit():
-                pid = int(token)
-                if pid not in pids:
-                    pids.append(pid)
-        if pids:
-            return pids
-    return pids
-
-
-def stop_pid(pid: int) -> None:
-    if pid <= 0:
-        return
-    try:
-        os.kill(pid, signal.SIGTERM)
-        time.sleep(1)
-        try:
-            os.kill(pid, 0)
-            os.kill(pid, signal.SIGKILL)
-        except OSError:
-            pass
-    except OSError:
-        pass
-
-
 def read_pid_file(path: Path) -> int | None:
     if not path.exists():
         return None
@@ -346,24 +324,12 @@ def stop_production_servers() -> None:
 
 
 def cloudflared_exe() -> str:
-    candidates: list[Path] = []
-    which = shutil.which("cloudflared")
-    if which:
-        candidates.append(Path(which))
-    candidates.append(Path.home() / ".local" / "bin" / "cloudflared")
-    candidates.append(Path("/usr/local/bin/cloudflared"))
-    candidates.append(Path("/usr/bin/cloudflared"))
-    for path in candidates:
-        if path.is_file() and os.access(path, os.X_OK):
-            return str(path)
-    raise SystemExit(
-        "cloudflared not found.\n"
-        "  Install: see cloudflare/README.md\n"
-        "  Or: curl -fsSL -o ~/.local/bin/cloudflared \\\n"
-        "       https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64\n"
-        "     chmod +x ~/.local/bin/cloudflared\n"
-        "Then re-run with --with-tunnel quick|named"
-    )
+    for path in cloudflared_candidates():
+        if path.is_file():
+            # On Windows, X_OK can be misleading; existence is enough
+            if sys.platform == "win32" or os.access(path, os.X_OK):
+                return str(path)
+    raise SystemExit(cloudflared_install_hint())
 
 
 def start_cloudflare_tunnel(mode: str) -> None:
@@ -433,21 +399,7 @@ def wait_for_quick_tunnel_url(*, timeout_s: int = 45) -> str | None:
 
 def start_detached(cmd: list[str], *, cwd: Path, log_file: Path, pid_file: Path) -> int:
     LOGS.mkdir(exist_ok=True)
-    log_fh = open(log_file, "a", encoding="utf-8")
-    log_fh.write(f"\n===== start {time.strftime('%Y-%m-%d %H:%M:%S')} =====\n")
-    log_fh.flush()
-
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(cwd),
-        stdout=log_fh,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        close_fds=True,
-    )
-    pid_file.write_text(str(proc.pid), encoding="utf-8")
-    print(f"  Started PID {proc.pid} → log {log_file}")
-    return proc.pid
+    return _start_detached(cmd, cwd=cwd, log_file=log_file, pid_file=pid_file)
 
 
 def start_production_servers() -> None:

@@ -6,15 +6,15 @@ Recommended for local production + internet view-only:
   nightly dump → keep N days locally → optional copy to another drive/PC.
 
 Usage:
-  python3 scripts/db_backup.py backup
-  python3 scripts/db_backup.py list
-  python3 scripts/db_backup.py restore latest
-  python3 scripts/db_backup.py install-cron
-  python3 scripts/db_backup.py uninstall-cron
-  python3 scripts/db_backup.py status
+  python scripts/db_backup.py backup
+  python scripts/db_backup.py list
+  python scripts/db_backup.py restore latest
+  python scripts/db_backup.py install-cron     # Linux cron / Windows Task Scheduler
+  python scripts/db_backup.py uninstall-cron
+  python scripts/db_backup.py status
 
 Env (optional):
-  RMS_BACKUP_DIR     default: /opt/rms/backups (else <repo>/backups)
+  RMS_BACKUP_DIR     default: /opt/rms/backups on Linux (else <repo>/backups)
   RMS_BACKUP_OFFSITE directory to copy each new dump (USB/NAS/other disk)
   RMS_BACKUP_KEEP_DAYS  retention days (default 14)
 """
@@ -38,7 +38,9 @@ BACKEND_ENV = ROOT / "backend" / ".env"
 CONTAINER = "rms-postgres"
 DEFAULT_KEEP_DAYS = 14
 CRON_MARKER = "# rms-db-backup"
+TASK_NAME = "MotoShopRMS-DB-Backup"
 DUMP_GLOB = "rms_*.sql.gz"
+IS_WIN = sys.platform == "win32"
 
 
 def docker_accessible() -> bool:
@@ -109,9 +111,10 @@ def default_backup_dir() -> Path:
     if env:
         return Path(env).expanduser().resolve()
 
-    preferred = Path("/opt/rms/backups")
-    if preferred.is_dir() or preferred.parent.is_dir():
-        return preferred
+    if not IS_WIN:
+        preferred = Path("/opt/rms/backups")
+        if preferred.is_dir() or preferred.parent.is_dir():
+            return preferred
 
     return (ROOT / "backups").resolve()
 
@@ -294,6 +297,8 @@ def cmd_restore(name: str, *, yes: bool) -> None:
 
 
 def crontab_get() -> str:
+    if IS_WIN:
+        return ""
     r = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         return ""
@@ -301,11 +306,13 @@ def crontab_get() -> str:
 
 
 def crontab_set(body: str) -> None:
+    if IS_WIN:
+        raise SystemExit("crontab is not available on Windows — use install-cron (Task Scheduler).")
     subprocess.run(["crontab", "-"], input=body, text=True, check=True)
 
 
 def cron_line(*, hour: int, minute: int, keep_days: int, offsite: Path | None) -> str:
-    py = shutil.which("python3") or sys.executable
+    py = shutil.which("python3") or shutil.which("python") or sys.executable
     script = ROOT / "scripts" / "db_backup.py"
     parts = [
         f"{minute} {hour} * * *",
@@ -321,8 +328,64 @@ def cron_line(*, hour: int, minute: int, keep_days: int, offsite: Path | None) -
     return " ".join(parts)
 
 
+def _windows_task_exists() -> bool:
+    r = subprocess.run(
+        ["schtasks", "/Query", "/TN", TASK_NAME],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return r.returncode == 0
+
+
 def cmd_install_cron(*, hour: int, minute: int, keep_days: int, offsite: Path | None) -> None:
     ensure_dir(default_backup_dir())
+
+    if IS_WIN:
+        py = shutil.which("python") or sys.executable
+        script = ROOT / "scripts" / "db_backup.py"
+        args = [
+            str(script),
+            "backup",
+            f"--keep-days",
+            str(keep_days),
+            "--quiet",
+        ]
+        if offsite:
+            args.extend(["--offsite", str(offsite)])
+        # schtasks /TR expects a single command string
+        tr = f'"{py}" ' + " ".join(f'"{a}"' if " " in a else a for a in args)
+        # Daily at HH:MM
+        st = f"{hour:02d}:{minute:02d}"
+        cmd = [
+            "schtasks",
+            "/Create",
+            "/F",
+            "/TN",
+            TASK_NAME,
+            "/SC",
+            "DAILY",
+            "/ST",
+            st,
+            "/TR",
+            tr,
+            "/RL",
+            "LIMITED",
+        ]
+        print(f"→ {' '.join(cmd)}")
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            raise SystemExit(
+                "Failed to create Task Scheduler job. "
+                "Try running PowerShell as Administrator."
+            )
+        print(f"Installed nightly Task Scheduler job '{TASK_NAME}' at {st} local time.")
+        print(f"Dumps → {default_backup_dir()}")
+        if offsite:
+            print(f"Offsite → {offsite}")
+        print("Manage: Task Scheduler → Task Scheduler Library →", TASK_NAME)
+        return
+
     existing = crontab_get()
     lines = [ln for ln in existing.splitlines() if CRON_MARKER not in ln]
     lines.append(cron_line(hour=hour, minute=minute, keep_days=keep_days, offsite=offsite))
@@ -336,6 +399,14 @@ def cmd_install_cron(*, hour: int, minute: int, keep_days: int, offsite: Path | 
 
 
 def cmd_uninstall_cron() -> None:
+    if IS_WIN:
+        if not _windows_task_exists():
+            print(f"Task '{TASK_NAME}' not found.")
+            return
+        subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"], check=False)
+        print(f"Removed Task Scheduler job '{TASK_NAME}'.")
+        return
+
     existing = crontab_get()
     lines = [ln for ln in existing.splitlines() if CRON_MARKER not in ln]
     crontab_set(("\n".join(lines).rstrip() + "\n") if lines else "")
@@ -370,13 +441,16 @@ def cmd_status() -> None:
     else:
         print("Latest dump:   (none)")
 
-    cron = crontab_get()
-    installed = any(CRON_MARKER in ln for ln in cron.splitlines())
-    print(f"Nightly cron:  {'installed' if installed else 'not installed'}")
-    if installed:
-        for ln in cron.splitlines():
-            if CRON_MARKER in ln:
-                print(f"  {ln}")
+    if IS_WIN:
+        print(f"Nightly task:  {'installed' if _windows_task_exists() else 'not installed'} ({TASK_NAME})")
+    else:
+        cron = crontab_get()
+        installed = any(CRON_MARKER in ln for ln in cron.splitlines())
+        print(f"Nightly cron:  {'installed' if installed else 'not installed'}")
+        if installed:
+            for ln in cron.splitlines():
+                if CRON_MARKER in ln:
+                    print(f"  {ln}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -406,7 +480,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("name", help="filename, path, or 'latest'")
     r.add_argument("--yes", action="store_true", help="skip confirmation")
 
-    c = sub.add_parser("install-cron", help="install nightly backup cron (default 02:00)")
+    c = sub.add_parser(
+        "install-cron",
+        help="install nightly backup (Linux cron / Windows Task Scheduler, default 02:00)",
+    )
     c.add_argument("--hour", type=int, default=2)
     c.add_argument("--minute", type=int, default=0)
 

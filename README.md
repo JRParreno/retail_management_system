@@ -7,9 +7,58 @@ All-in-one retail management and POS for a motorcycle repair shop.
 - **Backend:** FastAPI, SQLAlchemy 2.0, Pydantic v2, PostgreSQL, JWT + bcrypt
 - **Frontend:** Next.js App Router, TypeScript, Tailwind CSS, Shadcn UI
 - **DB (dev):** Docker Postgres (`docker-compose.yml`)
-- **Deploy:** Ubuntu / Pop!_OS — same Compose Postgres, app on host
+- **Deploy:** Windows or Ubuntu / Pop!_OS — same Compose Postgres, app on host
 
-## Launcher menu
+## Windows (local + production)
+
+Full guide: [`docs/windows-setup.md`](docs/windows-setup.md)
+
+**Prereqs:** Docker Desktop (running), Python 3.11+, Node 20+ LTS.
+
+### Local development
+
+```powershell
+.\local_run.ps1
+# or: local_run.bat
+# jump to start-all:
+.\local_run.ps1 5
+```
+
+| # | Action |
+|---|--------|
+| 1 | First-time setup (Docker + migrate + seed + npm install) |
+| 2 | Start Postgres |
+| 3 | Stop Postgres |
+| 4 | Migrate + seed |
+| 5 | Start ALL (Postgres + API + UI) |
+| 6 | Backend only (`:8000`) |
+| 7 | Frontend only (`:3000`) |
+| 8 | Status check |
+| A | Open Windows Firewall ports 3000/8000 (Administrator if needed) |
+
+- App: https://127.0.0.1:3000 · API docs: http://127.0.0.1:8000/docs  
+- LAN tablets: use the HTTPS LAN URL printed by option 5 (accept cert warning once)
+
+### Production deploy (no demo data)
+
+```powershell
+.\run_prod.ps1
+.\run_prod.ps1 --skip-build
+.\run_prod.ps1 --stop-only
+.\run_prod.ps1 --with-tunnel quick
+```
+
+### Backups
+
+```powershell
+.\run_db_backup.ps1 status
+.\run_db_backup.ps1 backup
+.\run_db_backup.ps1 install-cron    # Windows Task Scheduler @ 02:00
+```
+
+---
+
+## Linux / macOS — Launcher menu
 
 From the project root:
 
@@ -58,8 +107,10 @@ cd backend && python -m app.scripts.seed_admin
 
 From the project root:
 
+**Windows:** `.\run_prod.ps1` · **Linux:** `./run_prod.sh`
+
 ```bash
-chmod +x run_prod.sh   # once
+chmod +x run_prod.sh   # once (Linux)
 ./run_prod.sh
 ```
 
@@ -91,7 +142,8 @@ No router port-forward needed. See `cloudflare/README.md`.
 
 ```bash
 # Temporary public URL (testing)
-./run_prod.sh --with-tunnel quick
+./run_prod.sh --with-tunnel quick          # Linux
+.\run_prod.ps1 --with-tunnel quick         # Windows
 
 # Permanent hostname (after cloudflare/config.yml is set up)
 ./run_prod.sh --with-tunnel named
@@ -129,23 +181,29 @@ chmod +x run_prod_menu.sh
 One local Postgres + nightly dumps (no second live DB). Dumps go to `/opt/rms/backups` when that path exists, otherwise `./backups/`.
 
 ```bash
+# Linux
 chmod +x run_db_backup.sh
 ./run_db_backup.sh status
 ./run_db_backup.sh backup
 ./run_db_backup.sh install-cron                    # nightly 02:00
-./run_db_backup.sh install-cron --offsite /mnt/usb/rms-backups
-./run_db_backup.sh list
-./run_db_backup.sh restore latest                  # destructive; confirm with YES
+
+# Windows
+.\run_db_backup.ps1 status
+.\run_db_backup.ps1 backup
+.\run_db_backup.ps1 install-cron                   # Task Scheduler 02:00
 ```
 
-Or from the production menu: option **13**. Keep 14 days by default; set `RMS_BACKUP_DIR` / `RMS_BACKUP_OFFSITE` if needed.
+Or from the production menu (Linux): option **13**. Keep 14 days by default; set `RMS_BACKUP_DIR` / `RMS_BACKUP_OFFSITE` if needed.
 
 ---
 
 ```bash
 docker compose up -d
 cd backend && python -m venv .venv
+# Linux/macOS:
 source .venv/bin/activate
+# Windows PowerShell:
+# .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 alembic upgrade head && python -m app.scripts.seed
 uvicorn app.main:app --reload --port 8000

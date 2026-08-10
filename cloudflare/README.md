@@ -5,7 +5,15 @@ The tunnel targets the Next.js UI on `http://127.0.0.1:3000` (API is reached via
 
 ## Install `cloudflared`
 
-Follow [Cloudflare install docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/) for Linux / Ubuntu / Pop!_OS.
+Follow [Cloudflare install docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/) for your OS.
+
+**Windows:**
+
+```powershell
+winget install --id Cloudflare.cloudflared
+```
+
+**Linux / Ubuntu / Pop!_OS:** see the install page above, or download the `cloudflared-linux-amd64` binary.
 
 ## Option A — Quick tunnel (testing)
 
@@ -15,10 +23,12 @@ No Cloudflare account DNS needed. URL changes every restart.
 # Deploy + tunnel together:
 python scripts/prod_deploy.py --with-tunnel quick
 # Reuse existing build:
-./run_prod.sh --skip-build --with-tunnel quick
+./run_prod.sh --skip-build --with-tunnel quick          # Linux
+.\run_prod.ps1 --skip-build --with-tunnel quick         # Windows
 
 # App already running — only start/restart the tunnel:
 ./run_prod.sh --tunnel-only quick
+.\run_prod.ps1 --tunnel-only quick
 ```
 
 Look in the console / `logs/prod_tunnel_url.txt` / `logs/prod_tunnel.log` for a URL like:
