@@ -8,10 +8,10 @@ Optional: --self-signed for HTTPS on 443 (browser warning; good for tablet camer
 No DNS, no Certbot, no domain name required.
 
 Usage (from repo root on Ubuntu):
-  sudo ./run_ubuntu_https.sh
-  sudo ./run_ubuntu_https.sh --yes
-  sudo ./run_ubuntu_https.sh --self-signed --yes
-  sudo ./run_ubuntu_https.sh --skip-build --self-signed
+  sudo ./scripts/run_ubuntu_https.sh
+  sudo ./scripts/run_ubuntu_https.sh --yes
+  sudo ./scripts/run_ubuntu_https.sh --self-signed --yes
+  sudo ./scripts/run_ubuntu_https.sh --skip-build --self-signed
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def run(
 
 def require_root() -> None:
     if os.geteuid() != 0:
-        die("Run as root: sudo ./run_ubuntu_https.sh")
+        die("Run as root: sudo ./scripts/run_ubuntu_https.sh")
 
 
 def require_ubuntu() -> None:

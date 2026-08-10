@@ -11,17 +11,19 @@ All-in-one retail management and POS for a motorcycle repair shop.
 
 ## Windows (local + production)
 
-Full guide: [`docs/windows-setup.md`](docs/windows-setup.md)
+Full guide: [`docs/windows-setup.md`](docs/windows-setup.md) · Script index: [`scripts/README.md`](scripts/README.md)
 
 **Prereqs:** Docker Desktop (running), Python 3.11+, Node 20+ LTS.
 
 ### Local development
 
 ```powershell
-.\local_run.ps1
-# or: local_run.bat
+# Prefer .bat if PowerShell blocks scripts:
+scripts\local_run.bat
+# or:
+.\scripts\local_run.ps1
 # jump to start-all:
-.\local_run.ps1 5
+scripts\local_run.bat 5
 ```
 
 | # | Action |
@@ -42,18 +44,18 @@ Full guide: [`docs/windows-setup.md`](docs/windows-setup.md)
 ### Production deploy (no demo data)
 
 ```powershell
-.\run_prod.ps1
-.\run_prod.ps1 --skip-build
-.\run_prod.ps1 --stop-only
-.\run_prod.ps1 --with-tunnel quick
+.\scripts\run_prod.ps1
+.\scripts\run_prod.ps1 --skip-build
+.\scripts\run_prod.ps1 --stop-only
+.\scripts\run_prod.ps1 --with-tunnel quick
 ```
 
 ### Backups
 
 ```powershell
-.\run_db_backup.ps1 status
-.\run_db_backup.ps1 backup
-.\run_db_backup.ps1 install-cron    # Windows Task Scheduler @ 02:00
+.\scripts\run_db_backup.ps1 status
+.\scripts\run_db_backup.ps1 backup
+.\scripts\run_db_backup.ps1 install-cron    # Windows Task Scheduler @ 02:00
 ```
 
 ---
@@ -63,8 +65,8 @@ Full guide: [`docs/windows-setup.md`](docs/windows-setup.md)
 From the project root:
 
 ```bash
-chmod +x local_run.sh   # once
-./local_run.sh
+chmod +x scripts/local_run.sh   # once
+./scripts/local_run.sh
 ```
 
 Or:
@@ -107,11 +109,11 @@ cd backend && python -m app.scripts.seed_admin
 
 From the project root:
 
-**Windows:** `.\run_prod.ps1` · **Linux:** `./run_prod.sh`
+**Windows:** `.\scripts\run_prod.ps1` · **Linux:** `./scripts/run_prod.sh`
 
 ```bash
-chmod +x run_prod.sh   # once (Linux)
-./run_prod.sh
+chmod +x scripts/run_prod.sh   # once (Linux)
+./scripts/run_prod.sh
 ```
 
 Or:
@@ -142,14 +144,14 @@ No router port-forward needed. See `cloudflare/README.md`.
 
 ```bash
 # Temporary public URL (testing)
-./run_prod.sh --with-tunnel quick          # Linux
-.\run_prod.ps1 --with-tunnel quick         # Windows
+./scripts/run_prod.sh --with-tunnel quick          # Linux
+.\scripts\run_prod.ps1 --with-tunnel quick         # Windows
 
 # Permanent hostname (after cloudflare/config.yml is set up)
-./run_prod.sh --with-tunnel named
+./scripts/run_prod.sh --with-tunnel named
 
 # Tunnel only (app already running)
-./run_prod.sh --tunnel-only quick
+./scripts/run_prod.sh --tunnel-only quick
 ```
 
 ### Full Ubuntu production edge (Nginx, no domain)
@@ -159,10 +161,10 @@ Manual guide: [`docs/production-https-ubuntu.md`](docs/production-https-ubuntu.m
 **One-shot setup** (Ubuntu — Nginx reverse proxy by LAN/public IP, no DNS):
 
 ```bash
-chmod +x run_ubuntu_https.sh
-sudo ./run_ubuntu_https.sh --yes
+chmod +x scripts/run_ubuntu_https.sh
+sudo ./scripts/run_ubuntu_https.sh --yes
 # HTTPS with self-signed cert (tablet camera; accept browser warning once):
-sudo ./run_ubuntu_https.sh --self-signed --yes
+sudo ./scripts/run_ubuntu_https.sh --self-signed --yes
 ```
 
 Installs UFW, Nginx, and systemd units `rms-api` / `rms-web`. Open `http://<server-lan-ip>` (or `https://…` with `--self-signed`).
@@ -170,10 +172,10 @@ Installs UFW, Nginx, and systemd units `rms-api` / `rms-web`. Open `http://<serv
 **Day-to-day ops menu** (start / stop / restart / deploy after changes / logs):
 
 ```bash
-chmod +x run_prod_menu.sh
-./run_prod_menu.sh
+chmod +x scripts/run_prod_menu.sh
+./scripts/run_prod_menu.sh
 # or jump to an option, e.g. deploy:
-./run_prod_menu.sh 5
+./scripts/run_prod_menu.sh 5
 ```
 
 ### Database backups (recommended)
@@ -182,15 +184,15 @@ One local Postgres + nightly dumps (no second live DB). Dumps go to `/opt/rms/ba
 
 ```bash
 # Linux
-chmod +x run_db_backup.sh
-./run_db_backup.sh status
-./run_db_backup.sh backup
-./run_db_backup.sh install-cron                    # nightly 02:00
+chmod +x scripts/run_db_backup.sh
+./scripts/run_db_backup.sh status
+./scripts/run_db_backup.sh backup
+./scripts/run_db_backup.sh install-cron                    # nightly 02:00
 
 # Windows
-.\run_db_backup.ps1 status
-.\run_db_backup.ps1 backup
-.\run_db_backup.ps1 install-cron                   # Task Scheduler 02:00
+.\scripts\run_db_backup.ps1 status
+.\scripts\run_db_backup.ps1 backup
+.\scripts\run_db_backup.ps1 install-cron                   # Task Scheduler 02:00
 ```
 
 Or from the production menu (Linux): option **13**. Keep 14 days by default; set `RMS_BACKUP_DIR` / `RMS_BACKUP_OFFSITE` if needed.

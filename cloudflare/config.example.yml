@@ -6,11 +6,11 @@
 #   3. cloudflared tunnel create rms
 #   4. Copy this file to config.yml and fill tunnel id + credentials path
 #   5. cloudflared tunnel route dns rms app.yourdomain.com
-#   6. ./run_prod.sh --with-tunnel named
+#   6. ./scripts/run_prod.sh --with-tunnel named
 #      or: cloudflared tunnel --config cloudflare/config.yml run
 #
 # Quick test (no domain / temporary URL):
-#   ./run_prod.sh --with-tunnel quick
+#   ./scripts/run_prod.sh --with-tunnel quick
 
 tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: REPLACE_WITH_CREDENTIALS_JSON_PATH

@@ -1,7 +1,9 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Ubuntu / Linux / macOS launcher for MotoShop RMS menu
+# Usage: ./scripts/local_run.sh
 set -euo pipefail
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
 # Prefer Node 20+ from nvm (Tailwind 4 / Next 15 need it)
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"

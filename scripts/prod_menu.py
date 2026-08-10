@@ -2,11 +2,11 @@
 """
 Production ops menu for MotoShop RMS (Ubuntu systemd + Nginx).
 
-After first-time setup (`sudo ./run_ubuntu_https.sh`), use this to:
+After first-time setup (`sudo ./scripts/run_ubuntu_https.sh`), use this to:
   start / stop / restart services, deploy code changes, Cloudflare Tunnel, check status, view logs.
 
 Usage:
-  ./run_prod_menu.sh
+  ./scripts/run_prod_menu.sh
   python3 scripts/prod_menu.py
   python3 scripts/prod_menu.py 5    # jump to option 5
   python3 scripts/prod_menu.py 13   # database backup submenu

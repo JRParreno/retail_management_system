@@ -4,9 +4,9 @@ RMS launcher menu for Windows + Linux (Pop!_OS / Ubuntu).
 
 Usage:
   python scripts/dev_menu.py
-  ./local_run.sh          # Linux/macOS
-  .\\local_run.ps1         # Windows PowerShell
-  .\\local_run.bat         # Windows CMD
+  ./scripts/local_run.sh          # Linux/macOS
+  .\\scripts\\local_run.ps1         # Windows PowerShell
+  .\\scripts\\local_run.bat         # Windows CMD
 """
 
 from __future__ import annotations

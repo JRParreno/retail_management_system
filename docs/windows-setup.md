@@ -22,19 +22,22 @@ winget install --id Cloudflare.cloudflared   # public HTTPS tunnel
 
 ## Local development
 
-From the repo root in PowerShell:
+From the repo root in PowerShell (see also [`scripts/README.md`](../scripts/README.md)):
 
 ```powershell
-.\local_run.ps1
-# or jump straight to start-all:
-.\local_run.ps1 5
+# Prefer .bat if PowerShell blocks .ps1 (execution policy):
+scripts\local_run.bat
+# or after: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+.\scripts\local_run.ps1
+# jump straight to start-all:
+scripts\local_run.bat 5
 ```
 
 CMD:
 
 ```bat
-local_run.bat
-local_run.bat 5
+scripts\local_run.bat
+scripts\local_run.bat 5
 ```
 
 | # | Action |
@@ -61,33 +64,33 @@ On first phone/tablet visit, accept the self-signed certificate warning.
 Same machine, no demo catalog — admin only:
 
 ```powershell
-.\run_prod.ps1
+.\scripts\run_prod.ps1
 # restart without rebuild:
-.\run_prod.ps1 --skip-build
+.\scripts\run_prod.ps1 --skip-build
 # stop:
-.\run_prod.ps1 --stop-only
+.\scripts\run_prod.ps1 --stop-only
 ```
 
 Public HTTPS (no router port-forward):
 
 ```powershell
-.\run_prod.ps1 --with-tunnel quick
-.\run_prod.ps1 --with-tunnel named
-.\run_prod.ps1 --tunnel-only quick
+.\scripts\run_prod.ps1 --with-tunnel quick
+.\scripts\run_prod.ps1 --with-tunnel named
+.\scripts\run_prod.ps1 --tunnel-only quick
 ```
 
 See `cloudflare/README.md`. Login after deploy: `admin` / `admin123` — change it immediately.
 
-> Ubuntu Nginx/systemd edge (`run_ubuntu_https.sh`, `run_prod_menu.sh`) is Linux-only. On Windows use `run_prod.ps1` + optional Cloudflare Tunnel.
+> Ubuntu Nginx/systemd edge (`scripts/run_ubuntu_https.sh`, `scripts/run_prod_menu.sh`) is Linux-only. On Windows use `scripts/run_prod.ps1` + optional Cloudflare Tunnel.
 
 ## Database backups
 
 ```powershell
-.\run_db_backup.ps1 status
-.\run_db_backup.ps1 backup
-.\run_db_backup.ps1 install-cron          # Task Scheduler nightly 02:00
-.\run_db_backup.ps1 list
-.\run_db_backup.ps1 restore latest        # destructive; confirm with YES
+.\scripts\run_db_backup.ps1 status
+.\scripts\run_db_backup.ps1 backup
+.\scripts\run_db_backup.ps1 install-cron          # Task Scheduler nightly 02:00
+.\scripts\run_db_backup.ps1 list
+.\scripts\run_db_backup.ps1 restore latest        # destructive; confirm with YES
 ```
 
 Dumps default to `.\backups\`. Set `RMS_BACKUP_DIR` / `RMS_BACKUP_OFFSITE` if needed.

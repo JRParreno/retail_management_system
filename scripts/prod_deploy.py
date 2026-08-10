@@ -15,9 +15,9 @@ Usage (from repo root):
   python scripts/prod_deploy.py --skip-build
   python scripts/prod_deploy.py --with-tunnel quick
   python scripts/prod_deploy.py --with-tunnel named
-  ./run_prod.sh            # Linux
-  .\\run_prod.ps1          # Windows PowerShell
-  .\\run_prod.bat          # Windows CMD
+  ./scripts/run_prod.sh            # Linux
+  .\\scripts\\run_prod.ps1          # Windows PowerShell
+  .\\scripts\\run_prod.bat          # Windows CMD
 """
 
 from __future__ import annotations

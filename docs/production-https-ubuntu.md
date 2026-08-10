@@ -7,22 +7,22 @@ Complete guide for exposing this FastAPI + Next.js app from a home Ubuntu 24.04 
 On the Ubuntu server, from the repo root:
 
 ```bash
-chmod +x run_ubuntu_https.sh
-sudo ./run_ubuntu_https.sh --yes
+chmod +x scripts/run_ubuntu_https.sh
+sudo ./scripts/run_ubuntu_https.sh --yes
 ```
 
 Useful flags:
 
 ```bash
 # HTTP only (port 80) — simplest
-sudo ./run_ubuntu_https.sh --yes
+sudo ./scripts/run_ubuntu_https.sh --yes
 
 # HTTPS with self-signed cert (no Let's Encrypt / no domain)
 # Accept the browser warning once; needed for tablet camera scanning
-sudo ./run_ubuntu_https.sh --self-signed --yes
+sudo ./scripts/run_ubuntu_https.sh --self-signed --yes
 
 # App already built
-sudo ./run_ubuntu_https.sh --skip-build --self-signed --yes
+sudo ./scripts/run_ubuntu_https.sh --skip-build --self-signed --yes
 ```
 
 What the script does:
@@ -36,8 +36,8 @@ What the script does:
 **Day-to-day menu** (after setup):
 
 ```bash
-chmod +x run_prod_menu.sh
-./run_prod_menu.sh
+chmod +x scripts/run_prod_menu.sh
+./scripts/run_prod_menu.sh
 ```
 
 | # | Action |
@@ -99,7 +99,7 @@ Replace every `rms.example.com` below with your real hostname.
 │   ├── cloudflare/
 │   ├── docker-compose.yml
 │   └── ...
-├── backups/                      # DB dumps (./run_db_backup.sh)
+├── backups/                      # DB dumps (./scripts/run_db_backup.sh)
 └── secrets/                      # optional; keep out of git
 
 /etc/nginx/sites-available/rms
@@ -113,10 +113,10 @@ Nightly DB backup (recommended — single local Postgres, not a second live DB):
 
 ```bash
 cd /opt/rms/retail_management_system
-chmod +x run_db_backup.sh
-./run_db_backup.sh backup
-./run_db_backup.sh install-cron --offsite /path/to/usb-or-nas/rms-backups
-# or: ./run_prod_menu.sh 13
+chmod +x scripts/run_db_backup.sh
+./scripts/run_db_backup.sh backup
+./scripts/run_db_backup.sh install-cron --offsite /path/to/usb-or-nas/rms-backups
+# or: ./scripts/run_prod_menu.sh 13
 ```
 
 Dumps land in `/opt/rms/backups/` (14-day retention). Copy offsite daily via `--offsite` or `RMS_BACKUP_OFFSITE`.
@@ -134,8 +134,8 @@ cd retail_management_system
 Deploy the app (build + migrate + seed) before opening the firewall to the world:
 
 ```bash
-chmod +x run_prod.sh
-./run_prod.sh
+chmod +x scripts/run_prod.sh
+./scripts/run_prod.sh
 # or later with systemd (section 2.7 / 3.x) instead of the detached prod script
 ```
 
@@ -866,7 +866,7 @@ From this project you can also use:
 
 ```bash
 # after copying cloudflare/config.example.yml → cloudflare/config.yml
-./run_prod.sh --with-tunnel named
+./scripts/run_prod.sh --with-tunnel named
 ```
 
 For a permanent shop server, prefer the systemd `cloudflared` unit above so the tunnel survives reboot independently of the Python deploy script.
@@ -937,7 +937,7 @@ curl -sI https://rms.example.com
 3. **Do not publish** ports 3000/8000/5432 to the WAN; only 80/443 (or neither, with Tunnel).
 4. **SSH:** key-only auth, optionally non-default port + `ufw`; consider `fail2ban`.
 5. **Automatic updates:** `sudo apt install unattended-upgrades` and enable.
-6. **Backups:** use `./run_db_backup.sh install-cron` (or prod menu option 13) for nightly `pg_dump` to `/opt/rms/backups/` and optional `--offsite` copy.
+6. **Backups:** use `./scripts/run_db_backup.sh install-cron` (or prod menu option 13) for nightly `pg_dump` to `/opt/rms/backups/` and optional `--offsite` copy.
 7. **Least privilege:** run apps as `rms`, not root.
 8. **HSTS** only after HTTPS is stable (included in Nginx sample).
 9. **Cloudflare:** enable WAF managed rules if on a paid plan; always keep orange-cloud on the tunnel hostname.

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Ubuntu / Linux production deploy / restart
+# Usage: ./scripts/run_prod.sh
 set -euo pipefail
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
 if command -v python3 >/dev/null 2>&1; then
   exec python3 scripts/prod_deploy.py "$@"

@@ -23,12 +23,12 @@ No Cloudflare account DNS needed. URL changes every restart.
 # Deploy + tunnel together:
 python scripts/prod_deploy.py --with-tunnel quick
 # Reuse existing build:
-./run_prod.sh --skip-build --with-tunnel quick          # Linux
-.\run_prod.ps1 --skip-build --with-tunnel quick         # Windows
+./scripts/run_prod.sh --skip-build --with-tunnel quick          # Linux
+.\scripts\run_prod.ps1 --skip-build --with-tunnel quick         # Windows
 
 # App already running — only start/restart the tunnel:
-./run_prod.sh --tunnel-only quick
-.\run_prod.ps1 --tunnel-only quick
+./scripts/run_prod.sh --tunnel-only quick
+.\scripts\run_prod.ps1 --tunnel-only quick
 ```
 
 Look in the console / `logs/prod_tunnel_url.txt` / `logs/prod_tunnel.log` for a URL like:

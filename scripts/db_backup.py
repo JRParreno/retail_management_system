@@ -138,7 +138,7 @@ def container_ready(user: str, database: str) -> None:
         raise SystemExit(
             f"Postgres container `{CONTAINER}` is not ready.\n"
             "  Start it with: docker compose up -d\n"
-            "  Or: ./run_prod_menu.sh / ./local_run.sh (Postgres option)"
+            "  Or: ./scripts/run_prod_menu.sh / ./scripts/local_run.sh (Postgres option)"
         )
 
 

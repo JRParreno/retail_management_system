@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Postgres backup / restore helper (see scripts/db_backup.py)
+# Usage: ./scripts/run_db_backup.sh status
 set -euo pipefail
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
 
 if command -v python3 >/dev/null 2>&1; then
   exec python3 scripts/db_backup.py "$@"
