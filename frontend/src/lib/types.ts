@@ -119,6 +119,21 @@ export type ProductDeletionImpact = {
   return_lines: number;
 };
 
+export type ProductImportRowResult = {
+  row: number;
+  barcode: string | null;
+  name: string | null;
+  status: "created" | "skipped" | "error";
+  message: string;
+};
+
+export type ProductImportResponse = {
+  created: number;
+  skipped: number;
+  errors: number;
+  rows: ProductImportRowResult[];
+};
+
 export type ProductCategory = {
   id: string;
   name: string;

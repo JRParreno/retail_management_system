@@ -86,12 +86,18 @@ async function proxy(req: NextRequest, { params }: Params) {
 
   const body = await res.arrayBuffer();
 
+  const outHeaders: Record<string, string> = {
+    "content-type": res.headers.get("content-type") ?? "application/json",
+    "X-Request-Id": upstreamId,
+  };
+  const contentDisposition = res.headers.get("content-disposition");
+  if (contentDisposition) {
+    outHeaders["content-disposition"] = contentDisposition;
+  }
+
   return new NextResponse(body, {
     status: res.status,
-    headers: {
-      "content-type": res.headers.get("content-type") ?? "application/json",
-      "X-Request-Id": upstreamId,
-    },
+    headers: outHeaders,
   });
 }
 

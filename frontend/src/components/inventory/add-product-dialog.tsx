@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Printer, ScanBarcode, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
@@ -26,8 +26,10 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   categories: ProductCategory[];
+  brands: string[];
   onCreated: () => void;
   onCategoriesChanged: (categories: ProductCategory[]) => void;
+  onBrandsChanged: (brands: string[]) => void;
 };
 
 const emptyForm = {
@@ -45,21 +47,31 @@ export function AddProductDialog({
   open,
   onOpenChange,
   categories,
+  brands,
   onCreated,
   onCategoriesChanged,
+  onBrandsChanged,
 }: Props) {
   const [form, setForm] = useState(emptyForm);
   const [newCategory, setNewCategory] = useState("");
+  const [newBrand, setNewBrand] = useState("");
   const [saving, setSaving] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [printLabel, setPrintLabel] = useState<BarcodeLabelData | null>(null);
   const barcodeRef = useRef<HTMLInputElement>(null);
 
+  const brandOptions = useMemo(() => {
+    const names = [...brands];
+    if (form.brand && !names.includes(form.brand)) names.unshift(form.brand);
+    return names;
+  }, [brands, form.brand]);
+
   useEffect(() => {
     if (!open) {
       setForm(emptyForm);
       setNewCategory("");
+      setNewBrand("");
       setScanOpen(false);
       return;
     }
@@ -157,6 +169,30 @@ export function AddProductDialog({
       setField("categoryId", created.id);
       setNewCategory("");
       toast.success(`Category “${created.name}” added`);
+    } catch (err) {
+      toastError(err);
+    }
+  }
+
+  async function createBrand() {
+    const name = newBrand.trim();
+    if (!name) {
+      toast.error("Enter a brand name");
+      return;
+    }
+    try {
+      const created = await clientApi<{ name: string }>("/products/brands", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      onBrandsChanged(
+        [...brands, created.name]
+          .filter((b, i, arr) => arr.indexOf(b) === i)
+          .sort((a, b) => a.localeCompare(b)),
+      );
+      setField("brand", created.name);
+      setNewBrand("");
+      toast.success(`Brand “${created.name}” added`);
     } catch (err) {
       toastError(err);
     }
@@ -336,14 +372,34 @@ export function AddProductDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="product-brand">Brand (optional)</Label>
-              <Input
-                id="product-brand"
-                className="min-h-11"
-                placeholder="e.g. Motul, NGK"
-                value={form.brand}
-                onChange={(e) => setField("brand", e.target.value)}
+              <Label>Brand (optional)</Label>
+              <SearchableCombobox
+                value={form.brand || "none"}
+                onValueChange={(v) => setField("brand", v === "none" ? "" : v)}
+                placeholder="Select brand (optional)"
+                searchPlaceholder="Search brand…"
+                emptyText="No brands yet — add one below."
+                options={[
+                  { value: "none", label: "No brand" },
+                  ...brandOptions.map((b) => ({ value: b, label: b })),
+                ]}
               />
+              <div className="flex gap-2">
+                <Input
+                  className="min-h-11"
+                  placeholder="New brand name"
+                  value={newBrand}
+                  onChange={(e) => setNewBrand(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 shrink-0"
+                  onClick={() => void createBrand()}
+                >
+                  Add
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-2">

@@ -22,7 +22,7 @@ from app.models.mechanic import Mechanic
 from app.models.motorcycle import MotorcycleModel
 from app.models.notification import Notification
 from app.models.payment import Payment
-from app.models.product import Product, ProductCategory
+from app.models.product import Product, ProductBrand, ProductCategory
 from app.models.return_void import DocumentNumberSequence, ReturnVoid, ReturnVoidLaborLine, ReturnVoidPartLine
 from app.models.shift import CashierShift
 from app.models.shop_settings import ShopSettings
@@ -49,6 +49,7 @@ __all__ = [
     "Mechanic",
     "MotorcycleModel",
     "ProductCategory",
+    "ProductBrand",
     "Product",
     "StockAdjustment",
     "Notification",
