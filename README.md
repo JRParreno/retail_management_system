@@ -130,11 +130,19 @@ What it does:
 1. Checks Docker, Node, npm, Python  
 2. Starts Postgres  
 3. Installs backend deps, sets `DEBUG=false`  
-4. Runs migrations  
-5. Seeds **Main branch + `admin` / `admin123` only** (no demo products, mechanics, or cashier)  
+4. Runs migrations (includes `product_brands` catalog)  
+5. Seeds **Main branch**, **`admin` / `admin123`**, **product brands**, and **motorcycle/scooter models** (no demo products, mechanics, or cashier)  
 6. Builds the Next.js app  
 7. Stops old processes on ports 3000/8000 and starts production servers  
 8. Prints local + LAN URLs  
+
+Re-deploy and reset the admin password to `admin123`:
+
+```bash
+python scripts/prod_deploy.py --reset-admin
+```
+
+After deploy, use **Inventory → Import Excel** for bulk product upload (physical or auto `RMS…` barcodes).
 
 Login after deploy: `admin` / `admin123`
 

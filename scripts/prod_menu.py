@@ -528,7 +528,7 @@ def action_reload_nginx() -> None:
 
 
 def action_deploy() -> None:
-    """Pull optional, migrate, rebuild frontend, restart services."""
+    """Pull optional, migrate, seed catalogs, rebuild frontend, restart services."""
     print("\n=== Deploy / apply code changes ===")
     if not confirm("git pull from origin?"):
         print("  Skipping git pull")

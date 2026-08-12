@@ -23,7 +23,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | File | Role |
 |------|------|
 | `dev_menu.py` | Local/dev interactive menu (Postgres, migrate, API, UI) |
-| `prod_deploy.py` | Production build, migrate, seed admin, start servers, optional tunnel |
+| `prod_deploy.py` | Production build, migrate, seed catalogs + admin, start servers, optional tunnel |
 | `prod_menu.py` | Ubuntu day-to-day ops (systemd / Nginx / deploy / logs) |
 | `ubuntu_https_setup.py` | First-time Ubuntu Nginx + systemd edge |
 | `db_backup.py` | Postgres dump / restore / nightly schedule |
