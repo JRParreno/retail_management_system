@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # Postgres backup / restore helper (see scripts/db_backup.py)
-# Usage: ./scripts/run_db_backup.sh status
+#
+# Run from repo root OR scripts/:
+#   ./scripts/run_db_backup.sh install-cron
+#   bash scripts/run_db_backup.sh install-cron
+#
+# If ./ says "Permission denied", use bash (or: chmod +x scripts/run_db_backup.sh)
 set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT"
 
 if command -v python3 >/dev/null 2>&1; then
-  exec python3 scripts/db_backup.py "$@"
+  exec python3 "$ROOT/scripts/db_backup.py" "$@"
 fi
 if command -v python >/dev/null 2>&1; then
-  exec python scripts/db_backup.py "$@"
+  exec python "$ROOT/scripts/db_backup.py" "$@"
 fi
 
 echo "Python 3 not found." >&2
