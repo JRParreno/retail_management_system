@@ -109,10 +109,25 @@ def resolve_deploy_user(preferred: str = "rms") -> str | None:
     print(
         f"  Permission: user '{preferred}' cannot read {ROOT}\n"
         f"  Deploy will run as {current_login_user()} instead.\n"
-        f"  After deploy, use menu option 11 to set systemd User= to your login,\n"
-        f"  or: sudo chown -R {preferred}:{preferred} {ROOT}"
+        f"  Use menu option 11 to set systemd User= to your login user."
     )
     return None
+
+
+def action_restore_repo_ownership() -> None:
+    """Restore repo to login user after accidental chown to rms (fixes git pull)."""
+    user = current_login_user()
+    print(f"\n=== Restore repo ownership to {user} ===")
+    print(
+        "  Fixes git errors like: cannot open '.git/FETCH_HEAD'\n"
+        "  (happens when deploy chowned the whole repo to rms)."
+    )
+    if not confirm(f"Run: sudo chown -R {user}:{user} {ROOT} ?", default=True):
+        print("  Cancelled.")
+        return
+    run(syscmd("chown", "-R", f"{user}:{user}", str(ROOT)), check=False)
+    print(f"\n  Done. You can run: git pull")
+    print("  Recommended next: menu option 11 — set systemd User= to your login user.")
 
 
 def unit_exists(name: str) -> bool:
@@ -601,9 +616,11 @@ def action_deploy() -> None:
         run([sys.executable, deploy_py], check=False)
         run([sys.executable, deploy_py, "--stop-only"], check=False)
 
-    # Only chown when services actually run as rms and we built as rms
-    if deploy_user == "rms":
-        run(syscmd("chown", "-R", f"{deploy_user}:{deploy_user}", str(ROOT)), check=False)
+    if deploy_user is None:
+        print(
+            f"\n  Tip: run option 11 so rms-api / rms-web use User={current_login_user()} "
+            "(repo in your home — do not chown the whole project to rms)."
+        )
 
     action_restart()
     print("\nDeploy done.")
@@ -862,6 +879,7 @@ def menu_text() -> str:
 ║ 11  Fix service user + Node path         ║
 ║ 12  Cloudflare Tunnel (public HTTPS)     ║
 ║ 13  Database backup / restore            ║
+║ 14  Restore repo ownership (fix git)     ║
 ║  0  Exit                                 ║
 ╚══════════════════════════════════════════╝
 """
@@ -881,6 +899,7 @@ ACTIONS = {
     "11": action_fix_service_user,
     "12": action_cloudflare_tunnel,
     "13": action_db_backup,
+    "14": action_restore_repo_ownership,
 }
 
 
