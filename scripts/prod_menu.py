@@ -7,6 +7,7 @@ After first-time setup (`sudo ./scripts/run_ubuntu_https.sh`), use this to:
 
 Usage:
   ./scripts/run_prod_menu.sh
+  cd scripts && bash run_prod_menu.sh
   python3 scripts/prod_menu.py
   python3 scripts/prod_menu.py 5    # jump to option 5
   python3 scripts/prod_menu.py 13   # database backup submenu
@@ -15,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -64,6 +66,53 @@ def syscmd(*args: str) -> list[str]:
     if os.geteuid() == 0:
         return list(args)
     return ["sudo", *args]
+
+
+def current_login_user() -> str:
+    return os.environ.get("SUDO_USER") or os.environ.get("USER") or "jrparreno"
+
+
+def user_can_access_path(username: str, path: Path) -> bool:
+    """True if `username` can traverse the repo and read `path`."""
+    if not path.exists():
+        return False
+    if os.geteuid() == 0:
+        return True
+    if not shutil.which("sudo"):
+        return username == os.environ.get("USER")
+    cmd = (
+        f"test -x {shlex.quote(str(ROOT))} && "
+        f"test -r {shlex.quote(str(path))}"
+    )
+    probe = subprocess.run(
+        ["sudo", "-u", username, "bash", "-lc", cmd],
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
+def resolve_deploy_user(preferred: str = "rms") -> str | None:
+    """Use `rms` for deploy only when that user can read the repo; else current user."""
+    import pwd
+
+    try:
+        pwd.getpwnam(preferred)
+    except KeyError:
+        print(f"  User '{preferred}' not found — deploy runs as {current_login_user()}")
+        return None
+
+    deploy_script = ROOT / "scripts" / "prod_deploy.py"
+    if user_can_access_path(preferred, deploy_script):
+        return preferred
+
+    print(
+        f"  Permission: user '{preferred}' cannot read {ROOT}\n"
+        f"  Deploy will run as {current_login_user()} instead.\n"
+        f"  After deploy, use menu option 11 to set systemd User= to your login,\n"
+        f"  or: sudo chown -R {preferred}:{preferred} {ROOT}"
+    )
+    return None
 
 
 def unit_exists(name: str) -> bool:
@@ -535,51 +584,26 @@ def action_deploy() -> None:
     else:
         run(["git", "pull", "--ff-only"], check=False)
 
-    user = "rms"
-    # Prefer running build as rms if user exists
-    import pwd
+    deploy_user = resolve_deploy_user("rms")
+    deploy_py = str(ROOT / "scripts" / "prod_deploy.py")
 
-    try:
-        pwd.getpwnam(user)
-        as_user = True
-    except KeyError:
-        as_user = False
-        print(f"  User '{user}' not found — building as current user")
-
-    # Migrate + rebuild via prod_deploy, then stop detached procs so systemd owns ports
     print("\nBuilding / migrating…")
-    if as_user:
+    if deploy_user:
         run(
-            [
-                "sudo",
-                "-u",
-                user,
-                "python3",
-                str(ROOT / "scripts" / "prod_deploy.py"),
-            ],
+            ["sudo", "-u", deploy_user, "python3", deploy_py],
             check=False,
         )
         run(
-            [
-                "sudo",
-                "-u",
-                user,
-                "python3",
-                str(ROOT / "scripts" / "prod_deploy.py"),
-                "--stop-only",
-            ],
+            ["sudo", "-u", deploy_user, "python3", deploy_py, "--stop-only"],
             check=False,
         )
     else:
-        run([sys.executable, str(ROOT / "scripts" / "prod_deploy.py")], check=False)
-        run(
-            [sys.executable, str(ROOT / "scripts" / "prod_deploy.py"), "--stop-only"],
-            check=False,
-        )
+        run([sys.executable, deploy_py], check=False)
+        run([sys.executable, deploy_py, "--stop-only"], check=False)
 
-    # Ensure ownership for systemd user
-    if as_user:
-        run(syscmd("chown", "-R", f"{user}:{user}", str(ROOT)), check=False)
+    # Only chown when services actually run as rms and we built as rms
+    if deploy_user == "rms":
+        run(syscmd("chown", "-R", f"{deploy_user}:{deploy_user}", str(ROOT)), check=False)
 
     action_restart()
     print("\nDeploy done.")
@@ -865,6 +889,10 @@ def main() -> None:
 
     if not IS_LINUX:
         print("WARNING: Production menu is meant for Ubuntu/Pop!_OS with systemd.\n")
+    elif os.geteuid() != 0 and not shutil.which("sudo"):
+        print(
+            "WARNING: sudo not found — start/stop/deploy may fail with permission errors.\n"
+        )
 
     jump = sys.argv[1] if len(sys.argv) > 1 else None
 
