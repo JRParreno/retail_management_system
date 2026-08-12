@@ -449,7 +449,9 @@ export default function ShiftsPage() {
             <Label>Today&apos;s zero-commission mechanic</Label>
             <Select
               value={firstMechanicId || undefined}
-              onValueChange={(v) => void selectFirstMechanic(v)}
+              onValueChange={(v) => {
+                if (v) void selectFirstMechanic(v);
+              }}
               disabled={shift?.status !== "OPEN" || isSettled}
             >
               <SelectTrigger className="min-h-11">
