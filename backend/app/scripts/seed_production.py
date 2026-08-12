@@ -1,4 +1,12 @@
-"""Production bootstrap: Main branch + default ADMIN only (no demo data).
+"""Production bootstrap: Main branch + ADMIN + reference catalogs.
+
+Seeds (idempotent — safe to re-run):
+  - Main branch
+  - Default ADMIN user
+  - Product brands (scooter/parts catalog)
+  - Motorcycle / scooter models
+
+Does NOT seed demo products, mechanics, or cashier users.
 
 Run from backend cwd:
   python -m app.scripts.seed_production
@@ -12,6 +20,7 @@ from app.db.session import SessionLocal
 from app.models.branch import Branch
 from app.models.enums import Role
 from app.models.user import User
+from app.services.brands import list_brand_names, seed_default_brands
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
@@ -40,7 +49,7 @@ def ensure_main_branch(db) -> Branch:
 
 
 def seed_production(*, reset_admin_password: bool = True) -> None:
-    """Create shop foundation without demo products, mechanics, or cashier."""
+    """Create shop foundation + brand / motorcycle model catalogs."""
     db = SessionLocal()
     try:
         main_branch = ensure_main_branch(db)
@@ -70,18 +79,27 @@ def seed_production(*, reset_admin_password: bool = True) -> None:
                 f"{ADMIN_USERNAME} / {ADMIN_PASSWORD}"
             )
 
+        brand_created = seed_default_brands(db)
+        brand_total = len(list_brand_names(db))
+        if brand_created:
+            print(f"Created {brand_created} product brand(s) (total {brand_total})")
+        else:
+            print(f"Product brands already seeded (total {brand_total})")
+
         db.commit()
-        print("Production seed complete (Main branch + admin only — no demo data).")
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
 
-    # Catalog reference data (not demo sales data)
     from app.scripts.seed_motorcycle_models import seed_motorcycle_models
 
     seed_motorcycle_models()
+    print(
+        "Production seed complete "
+        "(Main branch + admin + brands + motorcycle/scooter models)."
+    )
 
 
 if __name__ == "__main__":

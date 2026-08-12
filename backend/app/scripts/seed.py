@@ -12,6 +12,7 @@ from app.models.enums import Role
 from app.models.mechanic import Mechanic
 from app.models.product import Product, ProductCategory
 from app.models.user import User
+from app.services.brands import seed_default_brands
 
 
 def _ensure_main_branch(db) -> Branch:
@@ -97,6 +98,12 @@ def seed() -> None:
             db.add(cat_fluids)
             db.flush()
             print("Created category: Fluids")
+
+        brand_created = seed_default_brands(db)
+        if brand_created:
+            print(f"Created {brand_created} product brand(s)")
+        else:
+            print("Product brands already seeded")
 
         products = [
             ("OIL-10W40-1L", "Motul 10W-40 1L", "Motul", Decimal("280.00"), Decimal("420.00"), 24, 5, cat_fluids.id),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileDown, Plus, Printer, RotateCcw, Trash2 } from "lucide-react";
+import { FileDown, Plus, Printer, RotateCcw, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { AddProductDialog } from "@/components/inventory/add-product-dialog";
@@ -11,6 +11,7 @@ import {
   type BarcodeLabelData,
 } from "@/components/inventory/barcode-label-print";
 import { EditProductDialog } from "@/components/inventory/edit-product-dialog";
+import { ImportProductsDialog } from "@/components/inventory/import-products-dialog";
 import { useBranch } from "@/components/branch/branch-context";
 import { useShop } from "@/components/shop/shop-context";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +70,7 @@ export default function InventoryPage() {
   const [lifecycle, setLifecycle] = useState<ProductLifecycle>("active");
   const [snapshotAt, setSnapshotAt] = useState(() => new Date());
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [printLabel, setPrintLabel] = useState<BarcodeLabelData | null>(null);
   const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null);
@@ -106,7 +108,7 @@ export default function InventoryPage() {
       const [products, cats, brandList] = await Promise.all([
         clientApi<Paginated<Product>>(`/products?${params}`),
         clientApi<ProductCategory[]>("/categories"),
-        clientApi<string[]>("/products/brands?lifecycle=all"),
+        clientApi<string[]>("/products/brands"),
       ]);
       setItems(products.items);
       setTotal(products.total);
@@ -239,18 +241,28 @@ export default function InventoryPage() {
           <p className="text-sm text-muted-foreground">
             Search and filter by brand, category, name, or barcode — export PDF
             or barcode labels for the filtered list
-            {isAdmin ? ". Admins can add products by scanning the real barcode." : ""}
+            {isAdmin ? ". Admins can add products by scanning the real barcode or import Excel." : ""}
           </p>
         </div>
         <div className="no-print flex flex-wrap gap-2">
           {isAdmin ? (
-            <Button
-              className="min-h-11 gap-2"
-              onClick={() => setAddOpen(true)}
-            >
-              <Plus className="size-4" />
-              Add product
-            </Button>
+            <>
+              <Button
+                className="min-h-11 gap-2"
+                onClick={() => setAddOpen(true)}
+              >
+                <Plus className="size-4" />
+                Add product
+              </Button>
+              <Button
+                className="min-h-11 gap-2"
+                variant="outline"
+                onClick={() => setImportOpen(true)}
+              >
+                <Upload className="size-4" />
+                Import Excel
+              </Button>
+            </>
           ) : null}
           <Button
             className="min-h-11 gap-2"
@@ -529,8 +541,17 @@ export default function InventoryPage() {
             open={addOpen}
             onOpenChange={setAddOpen}
             categories={categories}
+            brands={brands}
             onCategoriesChanged={setCategories}
+            onBrandsChanged={setBrands}
             onCreated={() => {
+              void load();
+            }}
+          />
+          <ImportProductsDialog
+            open={importOpen}
+            onOpenChange={setImportOpen}
+            onImported={() => {
               void load();
             }}
           />
@@ -541,6 +562,8 @@ export default function InventoryPage() {
               if (!open) setEditProduct(null);
             }}
             categories={categories}
+            brands={brands}
+            onBrandsChanged={setBrands}
             onSaved={() => {
               void load();
             }}

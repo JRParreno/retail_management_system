@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SearchableCombobox } from "@/components/ui/searchable-combobox";
 import { clientApi, toastError } from "@/lib/client-api";
 import type { Product, ProductCategory } from "@/lib/types";
 import { formatPeso } from "@/lib/types";
@@ -26,6 +27,8 @@ type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   categories: ProductCategory[];
+  brands: string[];
+  onBrandsChanged: (brands: string[]) => void;
   onSaved: () => void;
 };
 
@@ -34,10 +37,13 @@ export function EditProductDialog({
   open,
   onOpenChange,
   categories,
+  brands,
+  onBrandsChanged,
   onSaved,
 }: Props) {
   const [name, setName] = useState("");
   const [brand, setBrand] = useState("");
+  const [newBrand, setNewBrand] = useState("");
   const [costPrice, setCostPrice] = useState("");
   const [sellingPrice, setSellingPrice] = useState("");
   const [stockQty, setStockQty] = useState("");
@@ -52,15 +58,46 @@ export function EditProductDialog({
     );
   }, [categories, product]);
 
+  const brandOptions = useMemo(() => {
+    const names = [...brands];
+    if (brand && !names.includes(brand)) names.unshift(brand);
+    return names;
+  }, [brands, brand]);
+
   useEffect(() => {
     if (!open || !product) return;
     setName(product.name);
     setBrand(product.brand ?? "");
+    setNewBrand("");
     setCostPrice(product.cost_price);
     setSellingPrice(product.current_selling_price);
     setStockQty(String(product.stock_qty));
     setMinStock(String(product.min_stock_threshold));
   }, [open, product]);
+
+  async function createBrand() {
+    const next = newBrand.trim();
+    if (!next) {
+      toast.error("Enter a brand name");
+      return;
+    }
+    try {
+      const created = await clientApi<{ name: string }>("/products/brands", {
+        method: "POST",
+        body: JSON.stringify({ name: next }),
+      });
+      onBrandsChanged(
+        [...brands, created.name]
+          .filter((b, i, arr) => arr.indexOf(b) === i)
+          .sort((a, b) => a.localeCompare(b)),
+      );
+      setBrand(created.name);
+      setNewBrand("");
+      toast.success(`Brand “${created.name}” added`);
+    } catch (err) {
+      toastError(err);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -194,13 +231,34 @@ export function EditProductDialog({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="edit-brand">Brand (optional)</Label>
-              <Input
-                id="edit-brand"
-                className="min-h-11"
-                value={brand}
-                onChange={(e) => setBrand(e.target.value)}
+              <Label>Brand (optional)</Label>
+              <SearchableCombobox
+                value={brand || "none"}
+                onValueChange={(v) => setBrand(v === "none" ? "" : v)}
+                placeholder="Select brand (optional)"
+                searchPlaceholder="Search brand…"
+                emptyText="No brands yet — add one below."
+                options={[
+                  { value: "none", label: "No brand" },
+                  ...brandOptions.map((b) => ({ value: b, label: b })),
+                ]}
               />
+              <div className="flex gap-2">
+                <Input
+                  className="min-h-11"
+                  placeholder="New brand name"
+                  value={newBrand}
+                  onChange={(e) => setNewBrand(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-11 shrink-0"
+                  onClick={() => void createBrand()}
+                >
+                  Add
+                </Button>
+              </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">

@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,6 +15,23 @@ class ProductCategoryUpdate(BaseModel):
 
 
 class ProductCategoryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    created_at: datetime
+
+
+class ProductBrandCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class ProductBrandRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
@@ -101,3 +119,18 @@ class ProductDeletionImpact(BaseModel):
     stock_adjustments: int
     transfer_lines: int
     return_lines: int
+
+
+class ProductImportRowResult(BaseModel):
+    row: int
+    barcode: str | None = None
+    name: str | None = None
+    status: Literal["created", "skipped", "error"]
+    message: str
+
+
+class ProductImportResponse(BaseModel):
+    created: int
+    skipped: int
+    errors: int
+    rows: list[ProductImportRowResult]

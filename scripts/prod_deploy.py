@@ -4,15 +4,17 @@ Production deploy / restart for MotoShop RMS (Windows + Linux).
 
 - Checks required tools
 - Starts Postgres (Docker)
-- Installs backend + frontend deps
-- Migrates DB
-- Seeds Main branch + admin only (NO demo products/mechanics/cashier)
+- Installs backend + frontend deps (includes openpyxl for Excel inventory import)
+- Migrates DB (product_brands catalog, etc.)
+- Production seed: Main branch, admin, product brands, motorcycle/scooter models
+  (no demo products, mechanics, or cashier)
 - Builds Next.js
 - Stops old app processes and starts production servers
 
 Usage (from repo root):
   python scripts/prod_deploy.py
   python scripts/prod_deploy.py --skip-build
+  python scripts/prod_deploy.py --reset-admin
   python scripts/prod_deploy.py --with-tunnel quick
   python scripts/prod_deploy.py --with-tunnel named
   ./scripts/run_prod.sh            # Linux
@@ -280,10 +282,47 @@ def start_postgres() -> None:
     wait_for_postgres()
 
 
-def migrate_and_seed() -> None:
-    print("\n=== Migrate + production seed (admin only) ===")
+def migrate_and_seed(*, reset_admin_password: bool = False) -> None:
+    print("\n=== Database migrate + production catalog seed ===")
+    print("  Alembic: upgrade head (product brands catalog + schema updates)")
     run([str(py_exe()), "-m", "alembic", "upgrade", "head"], cwd=BACKEND)
-    run([str(py_exe()), "-m", "app.scripts.seed_production"], cwd=BACKEND)
+    print(
+        "  Seed: Main branch, admin, product brands (tires/accessories/scooter), "
+        "motorcycle/scooter models"
+    )
+    print("        Skips demo products, mechanics, and cashier users.")
+    reset_flag = "True" if reset_admin_password else "False"
+    run(
+        [
+            str(py_exe()),
+            "-c",
+            (
+                "from app.scripts.seed_production import seed_production; "
+                f"seed_production(reset_admin_password={reset_flag})"
+            ),
+        ],
+        cwd=BACKEND,
+    )
+    print_catalog_seed_summary()
+
+
+def print_catalog_seed_summary() -> None:
+    """Log brand/model counts after seed (non-fatal)."""
+    code = """
+from app.db.session import SessionLocal
+from app.services.brands import list_brand_names
+from sqlalchemy import func, select
+from app.models.motorcycle import MotorcycleModel
+
+db = SessionLocal()
+try:
+    brand_count = len(list_brand_names(db))
+    model_count = db.scalar(select(func.count()).select_from(MotorcycleModel)) or 0
+    print(f"  Catalog ready: {brand_count} product brands, {model_count} motorcycle/scooter models")
+finally:
+    db.close()
+""".strip()
+    run([str(py_exe()), "-c", code], cwd=BACKEND, check=False)
 
 
 def build_frontend() -> None:
@@ -486,7 +525,9 @@ def print_summary(*, tunnel_mode: str | None = None) -> None:
     elif tunnel_mode == "named":
         print("  Tunnel:   named (cloudflare/config.yml hostname)")
     print("  Login:    admin / admin123")
-    print("  Note:     No demo products/mechanics/cashier were seeded.")
+    print("  Seeded:   product brands + motorcycle/scooter models (reference catalogs)")
+    print("  Skipped:  demo products, mechanics, cashier users")
+    print("  Inventory: Excel bulk import available (ADMIN → Import Excel)")
     print(f"  Logs:     {BACKEND_LOG}")
     print(f"           {FRONTEND_LOG}")
     if tunnel_mode:
@@ -508,7 +549,12 @@ def main() -> None:
     parser.add_argument(
         "--skip-migrate",
         action="store_true",
-        help="Skip alembic + production seed",
+        help="Skip alembic migrations and production catalog seed",
+    )
+    parser.add_argument(
+        "--reset-admin",
+        action="store_true",
+        help="Reset admin password to admin123 when seeding (default: keep existing password)",
     )
     parser.add_argument(
         "--stop-only",
@@ -562,7 +608,7 @@ def main() -> None:
     ensure_backend_env()
 
     if not args.skip_migrate:
-        migrate_and_seed()
+        migrate_and_seed(reset_admin_password=args.reset_admin)
 
     if not args.skip_build:
         build_frontend()

@@ -2,11 +2,11 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-import secrets
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
@@ -14,21 +14,27 @@ from app.models.branch import Branch, BranchPrice, BranchStock, StockTransferLin
 from app.models.enums import NotificationType, Role, StockAdjustmentType
 from app.models.inventory import StockAdjustment
 from app.models.notification import Notification
-from app.models.product import Product, ProductCategory
+from app.models.product import Product, ProductBrand, ProductCategory
 from app.models.return_void import ReturnVoidPartLine
 from app.models.transaction import TransactionPartLine
 from app.models.user import User
 from app.schemas.common import PaginatedResponse
 from app.schemas.inventory import StockAdjustmentRead, StockAdjustRequest
 from app.schemas.product import (
+    ProductBrandCreate,
+    ProductBrandRead,
     ProductCategoryCreate,
     ProductCategoryRead,
     ProductCategoryUpdate,
     ProductCreate,
     ProductDeletionImpact,
+    ProductImportResponse,
     ProductRead,
     ProductUpdate,
 )
+from app.services.barcodes import generate_unique_barcode
+from app.services.brands import ensure_product_brand, list_brand_names
+from app.services.product_import import build_import_template, import_products_from_xlsx
 from app.services.stock import get_or_create_branch_stock
 
 router = APIRouter(tags=["products"])
@@ -165,18 +171,38 @@ def delete_category(
 
 @router.get("/products/brands", response_model=list[str])
 def list_brands(
-    lifecycle: ProductLifecycle = Query(default="active"),
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
 ) -> list[str]:
-    stmt = (
-        select(Product.brand)
-        .where(Product.brand.is_not(None), Product.brand != "")
-        .distinct()
-        .order_by(Product.brand)
+    """Return catalog brand names for filters and product forms."""
+    return list_brand_names(db)
+
+
+@router.post(
+    "/products/brands",
+    response_model=ProductBrandRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_brand(
+    body: ProductBrandCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+) -> ProductBrand:
+    existing = db.scalar(
+        select(ProductBrand).where(
+            func.lower(ProductBrand.name) == body.name.casefold()
+        )
     )
-    rows = db.scalars(_apply_lifecycle(stmt, lifecycle)).all()
-    return [b for b in rows if b]
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Brand name already exists",
+        )
+    brand = ProductBrand(name=body.name)
+    db.add(brand)
+    db.commit()
+    db.refresh(brand)
+    return brand
 
 
 @router.post("/products/barcode/generate")
@@ -189,16 +215,58 @@ def generate_product_barcode(
     Path is intentionally nested under /barcode/ so it cannot be captured by
     GET /products/{product_id}.
     """
-    for _ in range(32):
-        # RMS + 12 digits — unique, printable, gun/camera friendly
-        candidate = f"RMS{secrets.randbelow(10**12):012d}"
-        exists = db.scalar(select(Product.id).where(Product.barcode == candidate))
-        if exists is None:
-            return {"barcode": candidate}
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Could not generate a unique barcode — try again",
+    try:
+        return {"barcode": generate_unique_barcode(db)}
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/products/import/template")
+def download_product_import_template(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+) -> Response:
+    """Download .xlsx template for bulk product create (physical barcodes)."""
+    content = build_import_template(list_brand_names(db))
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="inventory-import-template.xlsx"',
+        },
     )
+
+
+@router.post("/products/import", response_model=ProductImportResponse)
+async def import_products(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN)),
+    active_branch_id: UUID = Depends(get_active_branch_id),
+) -> ProductImportResponse:
+    """Create products from Excel. Duplicate barcodes are skipped; other rows still import."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith(".xlsx"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .xlsx files are supported — download the template first",
+        )
+    data = await file.read()
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file",
+        )
+    try:
+        return import_products_from_xlsx(db, data, active_branch_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/products", response_model=PaginatedResponse[ProductRead])
@@ -268,6 +336,7 @@ def create_product(
     product = Product(**body.model_dump())
     db.add(product)
     db.flush()
+    ensure_product_brand(db, body.brand)
 
     db.add(
         BranchStock(
@@ -352,6 +421,8 @@ def update_product(
     selling_price = data.get("current_selling_price")
     for key, value in data.items():
         setattr(product, key, value)
+    if "brand" in data:
+        ensure_product_brand(db, data.get("brand"))
     if "min_stock_threshold" in data:
         branch_stock = get_or_create_branch_stock(
             db, branch_id=active_branch_id, product=product
