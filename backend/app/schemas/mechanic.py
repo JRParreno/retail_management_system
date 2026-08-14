@@ -2,7 +2,9 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.models.enums import TransactionStatus
 
 
 class MechanicCreate(BaseModel):
@@ -63,3 +65,40 @@ class MechanicProfileRead(BaseModel):
     labor_sales: Decimal
     commission_total: Decimal
     recent_lines: list[MechanicProfileLaborLine] = Field(default_factory=list)
+
+
+class MechanicLaborBoardRow(BaseModel):
+    mechanic_id: UUID | None = None
+    full_name: str
+    nickname: str
+    is_active: bool
+    job_count: int
+    line_count: int
+    labor_total: Decimal
+
+
+class MechanicLaborBoardRead(BaseModel):
+    start_date: date
+    end_date: date
+    mechanic_count: int
+    job_count: int
+    line_count: int
+    labor_total: Decimal
+    mechanics: list[MechanicLaborBoardRow] = Field(default_factory=list)
+
+
+class MechanicLaborWorkLine(MechanicProfileLaborLine):
+    transaction_status: TransactionStatus | None = None
+
+
+class MechanicLaborWorkRead(BaseModel):
+    mechanic_id: UUID | None = None
+    full_name: str
+    nickname: str
+    is_active: bool
+    start_date: date
+    end_date: date
+    job_count: int
+    line_count: int
+    labor_total: Decimal
+    lines: list[MechanicLaborWorkLine] = Field(default_factory=list)

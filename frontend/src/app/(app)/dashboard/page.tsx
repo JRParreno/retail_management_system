@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { useBranch } from "@/components/branch/branch-context";
+import { MechanicLaborSection } from "@/components/mechanics/mechanic-labor-section";
 import { useShop } from "@/components/shop/shop-context";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -82,6 +83,7 @@ const SECONDARY_ACTIONS: {
   { href: "/direct-sales", label: "Sale history", icon: ShoppingCart },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/refunds", label: "Refunds", icon: RotateCcw },
+  { href: "/mechanic-labor", label: "Mechanic labor", icon: Wrench },
   { href: "/mechanics", label: "Mechanics", icon: Wrench, adminOnly: true },
   { href: "/reports", label: "Reports", icon: Receipt, adminOnly: true },
 ];
@@ -437,6 +439,8 @@ export default function DashboardPage() {
               ) : null}
             </ul>
           </section>
+
+          <MechanicLaborSection />
 
           <section className="rounded-xl border bg-card">
             <div className="flex items-center justify-between gap-3 border-b px-4 py-3">

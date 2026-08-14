@@ -91,6 +91,43 @@ export type MechanicProfile = {
   recent_lines: MechanicProfileLaborLine[];
 };
 
+export type MechanicLaborBoardRow = {
+  mechanic_id: string | null;
+  full_name: string;
+  nickname: string;
+  is_active: boolean;
+  job_count: number;
+  line_count: number;
+  labor_total: string;
+};
+
+export type MechanicLaborBoard = {
+  start_date: string;
+  end_date: string;
+  mechanic_count: number;
+  job_count: number;
+  line_count: number;
+  labor_total: string;
+  mechanics: MechanicLaborBoardRow[];
+};
+
+export type MechanicLaborWorkLine = MechanicProfileLaborLine & {
+  transaction_status: "IN_PROGRESS" | "DONE" | "PAID" | "CANCELLED" | null;
+};
+
+export type MechanicLaborWork = {
+  mechanic_id: string | null;
+  full_name: string;
+  nickname: string;
+  is_active: boolean;
+  start_date: string;
+  end_date: string;
+  job_count: number;
+  line_count: number;
+  labor_total: string;
+  lines: MechanicLaborWorkLine[];
+};
+
 export type Product = {
   id: string;
   barcode: string;

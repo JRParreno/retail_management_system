@@ -14,15 +14,26 @@ from app.models.transaction import Transaction, TransactionLaborLine
 from app.models.user import User
 from app.schemas.mechanic import (
     MechanicCreate,
+    MechanicLaborBoardRead,
+    MechanicLaborWorkRead,
     MechanicProfileLaborLine,
     MechanicProfileRead,
     MechanicRead,
     MechanicUpdate,
 )
+from app.services.mechanic_labor import build_labor_board, build_labor_work
 
 router = APIRouter(prefix="/mechanics", tags=["mechanics"])
 
 ZERO = Decimal("0.00")
+
+
+def _require_date_range(start_date: date, end_date: date) -> None:
+    if end_date < start_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="end_date must be on or after start_date",
+        )
 
 
 @router.get("", response_model=list[MechanicRead])
@@ -31,6 +42,63 @@ def list_mechanics(
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
 ) -> list[Mechanic]:
     return list(db.scalars(select(Mechanic).order_by(Mechanic.full_name)).all())
+
+
+@router.get("/labor-board", response_model=MechanicLaborBoardRead)
+def get_mechanic_labor_board(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
+    active_branch_id: UUID = Depends(get_active_branch_id),
+) -> MechanicLaborBoardRead:
+    _require_date_range(start_date, end_date)
+    return build_labor_board(
+        db,
+        branch_id=active_branch_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@router.get("/unassigned/labor-work", response_model=MechanicLaborWorkRead)
+def get_unassigned_labor_work(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
+    active_branch_id: UUID = Depends(get_active_branch_id),
+) -> MechanicLaborWorkRead:
+    _require_date_range(start_date, end_date)
+    return build_labor_work(
+        db,
+        branch_id=active_branch_id,
+        start_date=start_date,
+        end_date=end_date,
+        unassigned_only=True,
+    )
+
+
+@router.get("/{mechanic_id}/labor-work", response_model=MechanicLaborWorkRead)
+def get_mechanic_labor_work(
+    mechanic_id: UUID,
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
+    active_branch_id: UUID = Depends(get_active_branch_id),
+) -> MechanicLaborWorkRead:
+    _require_date_range(start_date, end_date)
+    mechanic = db.get(Mechanic, mechanic_id)
+    if mechanic is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mechanic not found")
+    return build_labor_work(
+        db,
+        mechanic=mechanic,
+        branch_id=active_branch_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.get("/{mechanic_id}", response_model=MechanicRead)

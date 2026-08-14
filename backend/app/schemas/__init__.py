@@ -14,6 +14,10 @@ from app.schemas.common import DateRangeParams, PageParams, PaginatedResponse
 from app.schemas.inventory import StockAdjustmentCreate, StockAdjustmentRead, StockAdjustRequest
 from app.schemas.mechanic import (
     MechanicCreate,
+    MechanicLaborBoardRead,
+    MechanicLaborBoardRow,
+    MechanicLaborWorkLine,
+    MechanicLaborWorkRead,
     MechanicProfileLaborLine,
     MechanicProfileRead,
     MechanicRead,
@@ -115,6 +119,10 @@ __all__ = [
     "ProductSalesRow",
     "MechanicProfileLaborLine",
     "MechanicProfileRead",
+    "MechanicLaborBoardRow",
+    "MechanicLaborBoardRead",
+    "MechanicLaborWorkLine",
+    "MechanicLaborWorkRead",
     "BranchCreate",
     "BranchUpdate",
     "BranchRead",

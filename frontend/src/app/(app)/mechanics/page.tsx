@@ -127,6 +127,12 @@ export default function MechanicsPage() {
           <p className="text-sm text-muted-foreground">
             Commission-only payroll — one mechanic can work multiple open bikes
           </p>
+          <Link
+            href="/mechanic-labor"
+            className="mt-1 inline-block text-sm text-primary underline"
+          >
+            View mechanic labor board
+          </Link>
         </div>
         {isAdmin ? (
           <Button className="min-h-11 gap-2" onClick={openCreate}>

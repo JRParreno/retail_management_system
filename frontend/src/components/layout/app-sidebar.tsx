@@ -41,6 +41,7 @@ const NAV: { href: string; label: string; icon: typeof Bike; roles?: Role[] }[] 
     { href: "/refunds", label: "Refunds", icon: RotateCcw },
     { href: "/inventory", label: "Inventory", icon: Package },
     { href: "/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["ADMIN"] },
+    { href: "/mechanic-labor", label: "Mechanic labor", icon: Wrench },
     { href: "/mechanics", label: "Mechanics", icon: Wrench, roles: ["ADMIN"] },
     { href: "/shifts", label: "Shifts", icon: Clock3 },
     { href: "/reports", label: "Reports", icon: Receipt, roles: ["ADMIN"] },
