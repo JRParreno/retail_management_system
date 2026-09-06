@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileDown, Plus, Printer, RotateCcw, Trash2, Upload } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileDown,
+  FileSpreadsheet,
+  Plus,
+  Printer,
+  RotateCcw,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { AddProductDialog } from "@/components/inventory/add-product-dialog";
@@ -18,6 +28,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchableCombobox } from "@/components/ui/searchable-combobox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { clientApi, toastError } from "@/lib/client-api";
 import type {
   Paginated,
@@ -28,6 +45,9 @@ import type {
 import { formatPeso } from "@/lib/types";
 
 type ProductLifecycle = "active" | "disabled" | "deleted" | "all";
+
+const PAGE_SIZE_OPTIONS = [10, 100, 500] as const;
+type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
 function formatSnapshotDate(date: Date) {
   return date.toLocaleString("en-PH", {
@@ -61,7 +81,10 @@ export default function InventoryPage() {
   const { settings } = useShop();
   const isAdmin = user?.role === "ADMIN";
   const [items, setItems] = useState<Product[]>([]);
+  const [printItems, setPrintItems] = useState<Product[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(10);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
   const [q, setQ] = useState("");
@@ -74,6 +97,8 @@ export default function InventoryPage() {
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [printLabel, setPrintLabel] = useState<BarcodeLabelData | null>(null);
   const [lifecycleBusyId, setLifecycleBusyId] = useState<string | null>(null);
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [printBusy, setPrintBusy] = useState(false);
 
   const categoryName = useMemo(() => {
     if (categoryId === "all") return "All categories";
@@ -88,28 +113,45 @@ export default function InventoryPage() {
     return parts.join(" · ");
   }, [brandLabel, categoryName, lifecycle, q]);
 
-  const totalUnits = useMemo(
-    () => items.reduce((sum, p) => sum + p.stock_qty, 0),
-    [items],
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = Math.min(page * pageSize, total);
+
+  const printTotalUnits = useMemo(
+    () => printItems.reduce((sum, p) => sum + p.stock_qty, 0),
+    [printItems],
   );
 
-  const lowStockCount = useMemo(
-    () => items.filter((p) => p.stock_qty <= p.min_stock_threshold).length,
-    [items],
+  const printLowStockCount = useMemo(
+    () => printItems.filter((p) => p.stock_qty <= p.min_stock_threshold).length,
+    [printItems],
   );
 
-  async function load() {
+  function buildFilterParams(extra?: Record<string, string>) {
+    const params = new URLSearchParams(extra);
+    if (q.trim()) params.set("q", q.trim());
+    if (categoryId !== "all") params.set("category_id", categoryId);
+    if (brand !== "all") params.set("brand", brand);
+    params.set("lifecycle", lifecycle);
+    return params;
+  }
+
+  async function load(targetPage = page, size = pageSize) {
     try {
-      const params = new URLSearchParams({ page_size: "100" });
-      if (q.trim()) params.set("q", q.trim());
-      if (categoryId !== "all") params.set("category_id", categoryId);
-      if (brand !== "all") params.set("brand", brand);
-      params.set("lifecycle", lifecycle);
+      const params = buildFilterParams({
+        page: String(targetPage),
+        page_size: String(size),
+      });
       const [products, cats, brandList] = await Promise.all([
         clientApi<Paginated<Product>>(`/products?${params}`),
         clientApi<ProductCategory[]>("/categories"),
         clientApi<string[]>("/products/brands"),
       ]);
+      const maxPage = Math.max(1, Math.ceil(products.total / size));
+      if (products.total > 0 && targetPage > maxPage) {
+        setPage(maxPage);
+        return;
+      }
       setItems(products.items);
       setTotal(products.total);
       setCategories(cats);
@@ -120,10 +162,44 @@ export default function InventoryPage() {
     }
   }
 
+  async function fetchAllFilteredProducts(): Promise<Product[]> {
+    const fetchSize = 500;
+    let current = 1;
+    let collected: Product[] = [];
+    let expected = Infinity;
+
+    while (collected.length < expected) {
+      const params = buildFilterParams({
+        page: String(current),
+        page_size: String(fetchSize),
+      });
+      const res = await clientApi<Paginated<Product>>(`/products?${params}`);
+      expected = res.total;
+      collected = collected.concat(res.items);
+      if (!res.items.length || collected.length >= expected) break;
+      current += 1;
+    }
+
+    return collected;
+  }
+
   useEffect(() => {
-    load();
+    void load(page, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryId, brand, lifecycle]);
+  }, [page, pageSize, categoryId, brand, lifecycle]);
+
+  function changePageSize(next: PageSize) {
+    setPageSize(next);
+    setPage(1);
+  }
+
+  function resetToFirstPageAndLoad() {
+    if (page !== 1) {
+      setPage(1);
+    } else {
+      void load(1);
+    }
+  }
 
   async function setProductEnabled(product: Product, isActive: boolean) {
     setLifecycleBusyId(product.id);
@@ -207,30 +283,84 @@ export default function InventoryPage() {
     }
   }
 
-  function exportPdf() {
-    const stamped = new Date();
-    setSnapshotAt(stamped);
-    const previous = document.title;
-    document.title = `${fileSafeName(settings.business_name)}-Inventory-${formatSnapshotFileStamp(stamped)}`;
-    // Wait for snapshot timestamp to paint before opening the print dialog
-    window.setTimeout(() => {
-      window.print();
-      document.title = previous;
-    }, 50);
+  async function exportExcel() {
+    setExportingExcel(true);
+    try {
+      const params = buildFilterParams();
+      const res = await fetch(`/api/proxy/products/export?${params}`);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const data = await res.json();
+          detail =
+            typeof data.detail === "string" ? data.detail : res.statusText;
+        } catch {
+          /* ignore */
+        }
+        throw new Error(detail || "Failed to export inventory");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${fileSafeName(settings.business_name)}-inventory-export.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Inventory exported");
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setExportingExcel(false);
+    }
   }
 
-  function exportBarcodes() {
-    if (!items.length) {
-      toast.error("No products to export");
-      return;
+  async function exportPdf() {
+    setPrintBusy(true);
+    try {
+      const all = await fetchAllFilteredProducts();
+      if (!all.length) {
+        toast.error("No products to export");
+        return;
+      }
+      const stamped = new Date();
+      setPrintItems(all);
+      setSnapshotAt(stamped);
+      const previous = document.title;
+      document.title = `${fileSafeName(settings.business_name)}-Inventory-${formatSnapshotFileStamp(stamped)}`;
+      // Wait for full inventory rows to paint before opening the print dialog
+      window.setTimeout(() => {
+        window.print();
+        document.title = previous;
+        setPrintBusy(false);
+      }, 100);
+    } catch (err) {
+      toastError(err);
+      setPrintBusy(false);
     }
-    printBarcodeLabels(
-      items.map((p) => ({
-        barcode: p.barcode,
-        name: p.name,
-      })),
-      1,
-    );
+  }
+
+  async function exportBarcodes() {
+    setPrintBusy(true);
+    try {
+      const all = await fetchAllFilteredProducts();
+      if (!all.length) {
+        toast.error("No products to export");
+        return;
+      }
+      printBarcodeLabels(
+        all.map((p) => ({
+          barcode: p.barcode,
+          name: p.name,
+        })),
+        1,
+      );
+    } catch (err) {
+      toastError(err);
+    } finally {
+      setPrintBusy(false);
+    }
   }
 
   return (
@@ -239,8 +369,8 @@ export default function InventoryPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Inventory</h1>
           <p className="text-sm text-muted-foreground">
-            Search and filter by brand, category, name, or barcode — export PDF
-            or barcode labels for the filtered list
+            Search and filter by brand, category, name, or barcode — export Excel
+            (import format), PDF, or barcode labels for the full filtered list
             {isAdmin ? ". Admins can add products by scanning the real barcode or import Excel." : ""}
           </p>
         </div>
@@ -267,8 +397,17 @@ export default function InventoryPage() {
           <Button
             className="min-h-11 gap-2"
             variant="outline"
-            disabled={!items.length}
-            onClick={exportBarcodes}
+            disabled={exportingExcel || total === 0}
+            onClick={() => void exportExcel()}
+          >
+            <FileSpreadsheet className="size-4" />
+            {exportingExcel ? "Exporting…" : "Export Excel"}
+          </Button>
+          <Button
+            className="min-h-11 gap-2"
+            variant="outline"
+            disabled={printBusy || total === 0}
+            onClick={() => void exportBarcodes()}
           >
             <Printer className="size-4" />
             Export barcodes
@@ -276,11 +415,11 @@ export default function InventoryPage() {
           <Button
             className="min-h-11 gap-2"
             variant="outline"
-            disabled={!items.length}
-            onClick={exportPdf}
+            disabled={printBusy || total === 0}
+            onClick={() => void exportPdf()}
           >
             <FileDown className="size-4" />
-            Export PDF
+            {printBusy ? "Preparing…" : "Export PDF"}
           </Button>
         </div>
       </div>
@@ -291,12 +430,17 @@ export default function InventoryPage() {
           placeholder="Search name, barcode, or brand"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && load()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") resetToFirstPageAndLoad();
+          }}
         />
         <SearchableCombobox
           className="lg:w-48"
           value={brand}
-          onValueChange={setBrand}
+          onValueChange={(value) => {
+            setBrand(value);
+            setPage(1);
+          }}
           placeholder="All brands"
           searchPlaceholder="Search brand…"
           emptyText="No brands found."
@@ -308,7 +452,10 @@ export default function InventoryPage() {
         <SearchableCombobox
           className="lg:w-48"
           value={categoryId}
-          onValueChange={setCategoryId}
+          onValueChange={(value) => {
+            setCategoryId(value);
+            setPage(1);
+          }}
           placeholder="All categories"
           searchPlaceholder="Search category…"
           emptyText="No categories found."
@@ -320,7 +467,10 @@ export default function InventoryPage() {
         <SearchableCombobox
           className="lg:w-44"
           value={lifecycle}
-          onValueChange={(value) => setLifecycle(value as ProductLifecycle)}
+          onValueChange={(value) => {
+            setLifecycle(value as ProductLifecycle);
+            setPage(1);
+          }}
           placeholder="Product status"
           searchPlaceholder="Search status…"
           emptyText="No status found."
@@ -331,7 +481,7 @@ export default function InventoryPage() {
             { value: "all", label: "All statuses" },
           ]}
         />
-        <Button className="min-h-11" onClick={load}>
+        <Button className="min-h-11" onClick={resetToFirstPageAndLoad}>
           Search
         </Button>
       </div>
@@ -352,7 +502,17 @@ export default function InventoryPage() {
           <tbody>
             {items.map((p) => (
               <tr key={p.id} className="border-b last:border-0">
-                <td className="px-3 py-3 font-medium">{p.name}</td>
+                <td className="px-3 py-3 font-medium">
+                  <div>{p.name}</div>
+                  {(p.applicable_motorcycle_models ?? []).length > 0 ? (
+                    <p className="mt-1 text-xs font-normal text-muted-foreground">
+                      Fits:{" "}
+                      {(p.applicable_motorcycle_models ?? [])
+                        .map((m) => m.display_name)
+                        .join(", ")}
+                    </p>
+                  ) : null}
+                </td>
                 <td className="px-3 py-3 text-muted-foreground">
                   {p.brand ?? "—"}
                 </td>
@@ -462,7 +622,61 @@ export default function InventoryPage() {
         </table>
       </div>
 
-      {/* Print / PDF audit sheet */}
+      <div className="no-print flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+          <p className="text-sm text-muted-foreground">
+            {total === 0
+              ? "No products"
+              : `Showing ${rangeStart}–${rangeEnd} of ${total}`}
+          </p>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Rows</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => {
+                if (!value) return;
+                changePageSize(Number(value) as PageSize);
+              }}
+            >
+              <SelectTrigger className="h-11 w-[5.5rem]">
+                <SelectValue>{String(pageSize)}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            className="min-h-11 gap-1"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            <ChevronLeft className="size-4" />
+            Previous
+          </Button>
+          <span className="min-w-24 text-center text-sm tabular-nums text-muted-foreground">
+            Page {page} of {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            className="min-h-11 gap-1"
+            disabled={page >= totalPages || total === 0}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Print / PDF audit sheet — uses full filtered inventory, not just current page */}
       <div className="report-print-area report-print-only">
         <h1>{settings.business_name} — Inventory Stock Snapshot</h1>
         <p className="report-print-meta">
@@ -475,12 +689,11 @@ export default function InventoryPage() {
           <br />
           <strong>Filters:</strong> {filterSummary}
           <br />
-          <strong>SKUs listed:</strong> {items.length}
-          {total > items.length ? ` of ${total}` : ""}
+          <strong>SKUs listed:</strong> {printItems.length}
           {" · "}
-          <strong>System units:</strong> {totalUnits}
+          <strong>System units:</strong> {printTotalUnits}
           {" · "}
-          <strong>Low stock:</strong> {lowStockCount}
+          <strong>Low stock:</strong> {printLowStockCount}
           <br />
           Use this sheet to count physical stock and compare against system qty.
         </p>
@@ -499,7 +712,7 @@ export default function InventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {items.map((p, index) => (
+            {printItems.map((p, index) => (
               <tr key={p.id}>
                 <td>{index + 1}</td>
                 <td>

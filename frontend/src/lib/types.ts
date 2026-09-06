@@ -143,6 +143,12 @@ export type Product = {
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
+  applicable_motorcycle_models?: {
+    id: string;
+    brand: string;
+    name: string;
+    display_name: string;
+  }[];
 };
 
 export type ProductDeletionImpact = {
@@ -160,12 +166,13 @@ export type ProductImportRowResult = {
   row: number;
   barcode: string | null;
   name: string | null;
-  status: "created" | "skipped" | "error";
+  status: "created" | "updated" | "skipped" | "error";
   message: string;
 };
 
 export type ProductImportResponse = {
   created: number;
+  updated: number;
   skipped: number;
   errors: number;
   rows: ProductImportRowResult[];

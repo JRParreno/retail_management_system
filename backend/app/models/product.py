@@ -2,11 +2,28 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Table, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+product_motorcycle_models = Table(
+    "product_motorcycle_models",
+    Base.metadata,
+    Column(
+        "product_id",
+        UUID(as_uuid=True),
+        ForeignKey("products.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "motorcycle_model_id",
+        UUID(as_uuid=True),
+        ForeignKey("motorcycle_models.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
 
 
 class ProductCategory(Base):
@@ -71,6 +88,11 @@ class Product(Base):
     )
 
     category = relationship("ProductCategory", back_populates="products")
+    applicable_motorcycle_models = relationship(
+        "MotorcycleModel",
+        secondary=product_motorcycle_models,
+        order_by="MotorcycleModel.brand, MotorcycleModel.name",
+    )
     part_lines = relationship("TransactionPartLine", back_populates="product")
     stock_adjustments = relationship("StockAdjustment", back_populates="product")
     notifications = relationship("Notification", back_populates="product")

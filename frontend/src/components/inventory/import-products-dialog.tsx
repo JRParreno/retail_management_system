@@ -90,10 +90,19 @@ export function ImportProductsDialog({
         body: form,
       });
       setResult(res);
-      if (res.created > 0) {
-        toast.success(
-          `Created ${res.created} product${res.created === 1 ? "" : "s"}`,
-        );
+      if (res.created > 0 || (res.updated ?? 0) > 0) {
+        const parts = [];
+        if (res.created > 0) {
+          parts.push(
+            `Created ${res.created} product${res.created === 1 ? "" : "s"}`,
+          );
+        }
+        if ((res.updated ?? 0) > 0) {
+          parts.push(
+            `updated fitment on ${res.updated} existing`,
+          );
+        }
+        toast.success(parts.join(" · "));
         onImported();
       } else if (res.errors === 0 && res.skipped > 0) {
         toast.message("No new products — all barcodes already exist");
@@ -116,7 +125,11 @@ export function ImportProductsDialog({
             Physical barcode preferred. Leave barcode blank to auto-generate an
             internal RMS code — duplicates without a barcode are skipped when
             the same name + brand already exists. Opening stock applies to the
-            active branch.
+            active branch. Use{" "}
+            <span className="font-mono">applicable_model_1</span>…{" "}
+            <span className="font-mono">applicable_model_8</span> dropdowns
+            (one model per column). Existing barcodes can update fitment when
+            those columns are filled.
           </DialogDescription>
         </DialogHeader>
 
@@ -124,9 +137,9 @@ export function ImportProductsDialog({
           <div className="rounded-lg border border-dashed p-4">
             <p className="text-sm font-medium">1. Download the template</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Keep the barcode column as text. Leave barcode blank if the item
-              has no package code (RMS… is generated). Use the brand dropdown
-              (Brands sheet). Prefer scanning into Excel when a barcode exists.
+              Keep the barcode column as text. Brand and each applicable model
+              column have dropdowns — pick one model per column (e.g. Click in
+              model 1, Wave in model 2). Leave unused model columns blank.
             </p>
             <Button
               type="button"
@@ -163,8 +176,8 @@ export function ImportProductsDialog({
           {result ? (
             <div className="space-y-2 rounded-lg border p-3">
               <p className="text-sm font-medium">
-                Created {result.created} · Skipped {result.skipped} · Errors{" "}
-                {result.errors}
+                Created {result.created} · Updated {result.updated ?? 0} ·
+                Skipped {result.skipped} · Errors {result.errors}
               </p>
               <div className="max-h-48 overflow-y-auto text-xs">
                 <table className="w-full">

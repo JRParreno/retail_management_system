@@ -8,6 +8,7 @@ import {
   BarcodeLabelPrintDialog,
   type BarcodeLabelData,
 } from "@/components/inventory/barcode-label-print";
+import { ApplicableMotorcycleModelsField } from "@/components/inventory/applicable-motorcycle-models-field";
 import { BarcodeScanModal } from "@/components/pos/barcode-scan-modal";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +54,7 @@ export function AddProductDialog({
   onBrandsChanged,
 }: Props) {
   const [form, setForm] = useState(emptyForm);
+  const [modelIds, setModelIds] = useState<string[]>([]);
   const [newCategory, setNewCategory] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [saving, setSaving] = useState(false);
@@ -70,6 +72,7 @@ export function AddProductDialog({
   useEffect(() => {
     if (!open) {
       setForm(emptyForm);
+      setModelIds([]);
       setNewCategory("");
       setNewBrand("");
       setScanOpen(false);
@@ -246,6 +249,7 @@ export function AddProductDialog({
           min_stock_threshold: minStock,
           category_id: form.categoryId || null,
           is_active: true,
+          applicable_motorcycle_model_ids: modelIds,
         }),
       });
       toast.success(`Added “${name}”`);
@@ -443,6 +447,11 @@ export function AddProductDialog({
                 </Button>
               </div>
             </div>
+
+            <ApplicableMotorcycleModelsField
+              selectedIds={modelIds}
+              onChange={setModelIds}
+            />
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">

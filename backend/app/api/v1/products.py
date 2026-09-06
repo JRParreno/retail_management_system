@@ -6,13 +6,14 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import Response
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.deps import get_active_branch_id, require_role
 from app.db.session import get_db
 from app.models.branch import Branch, BranchPrice, BranchStock, StockTransferLine
 from app.models.enums import NotificationType, Role, StockAdjustmentType
 from app.models.inventory import StockAdjustment
+from app.models.motorcycle import MotorcycleModel
 from app.models.notification import Notification
 from app.models.product import Product, ProductBrand, ProductCategory
 from app.models.return_void import ReturnVoidPartLine
@@ -29,12 +30,18 @@ from app.schemas.product import (
     ProductCreate,
     ProductDeletionImpact,
     ProductImportResponse,
+    ProductMotorcycleModelRead,
     ProductRead,
     ProductUpdate,
 )
 from app.services.barcodes import generate_unique_barcode
 from app.services.brands import ensure_product_brand, list_brand_names
-from app.services.product_import import build_import_template, import_products_from_xlsx
+from app.services.product_import import (
+    build_export_xlsx,
+    build_import_template,
+    import_products_from_xlsx,
+    models_to_export_slots,
+)
 from app.services.stock import get_or_create_branch_stock
 
 router = APIRouter(tags=["products"])
@@ -65,7 +72,7 @@ def _overlay_products(
                 BranchStock.product_id.in_(product_ids),
             )
         ).all()
-    }
+    } if product_ids else {}
     prices = {
         pr.product_id: pr
         for pr in db.scalars(
@@ -74,7 +81,7 @@ def _overlay_products(
                 BranchPrice.product_id.in_(product_ids),
             )
         ).all()
-    }
+    } if product_ids else {}
     results: list[ProductRead] = []
     for product in products:
         read = ProductRead.model_validate(product)
@@ -86,8 +93,44 @@ def _overlay_products(
         read.current_selling_price = (
             price.selling_price if price is not None else product.current_selling_price
         )
+        read.applicable_motorcycle_models = [
+            ProductMotorcycleModelRead(
+                id=m.id,
+                brand=m.brand,
+                name=m.name,
+                display_name=m.display_name,
+            )
+            for m in product.applicable_motorcycle_models
+        ]
         results.append(read)
     return results
+
+
+def _load_motorcycle_models(db: Session, model_ids: list[UUID]) -> list[MotorcycleModel]:
+    if not model_ids:
+        return []
+    unique_ids = list(dict.fromkeys(model_ids))
+    models = list(
+        db.scalars(
+            select(MotorcycleModel).where(
+                MotorcycleModel.id.in_(unique_ids),
+                MotorcycleModel.is_active.is_(True),
+            )
+        ).all()
+    )
+    if len(models) != len(unique_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="One or more motorcycle models were not found or are inactive",
+        )
+    by_id = {m.id: m for m in models}
+    return [by_id[mid] for mid in unique_ids]
+
+
+def _set_applicable_motorcycle_models(
+    db: Session, product: Product, model_ids: list[UUID]
+) -> None:
+    product.applicable_motorcycle_models = _load_motorcycle_models(db, model_ids)
 
 
 # --- Categories ---
@@ -230,7 +273,15 @@ def download_product_import_template(
     _: User = Depends(require_role(Role.ADMIN)),
 ) -> Response:
     """Download .xlsx template for bulk product create (physical barcodes)."""
-    content = build_import_template(list_brand_names(db))
+    motorcycle_names = [
+        m.display_name
+        for m in db.scalars(
+            select(MotorcycleModel)
+            .where(MotorcycleModel.is_active.is_(True))
+            .order_by(MotorcycleModel.brand, MotorcycleModel.name)
+        ).all()
+    ]
+    content = build_import_template(list_brand_names(db), motorcycle_names)
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -269,18 +320,13 @@ async def import_products(
         ) from exc
 
 
-@router.get("/products", response_model=PaginatedResponse[ProductRead])
-def list_products(
-    q: str | None = Query(default=None),
-    category_id: UUID | None = Query(default=None),
-    brand: str | None = Query(default=None),
-    lifecycle: ProductLifecycle = Query(default="active"),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
-    active_branch_id: UUID = Depends(get_active_branch_id),
-) -> PaginatedResponse[ProductRead]:
+def _product_filter_stmts(
+    *,
+    q: str | None,
+    category_id: UUID | None,
+    brand: str | None,
+    lifecycle: ProductLifecycle,
+):
     stmt = _apply_lifecycle(select(Product), lifecycle)
     count_stmt = _apply_lifecycle(select(func.count()).select_from(Product), lifecycle)
     if q:
@@ -299,11 +345,98 @@ def list_products(
         brand_filter = brand.strip()
         stmt = stmt.where(Product.brand.ilike(brand_filter))
         count_stmt = count_stmt.where(Product.brand.ilike(brand_filter))
+    return stmt, count_stmt
+
+
+@router.get("/products/export")
+def export_products(
+    q: str | None = Query(default=None),
+    category_id: UUID | None = Query(default=None),
+    brand: str | None = Query(default=None),
+    lifecycle: ProductLifecycle = Query(default="active"),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
+    active_branch_id: UUID = Depends(get_active_branch_id),
+) -> Response:
+    """Download inventory as .xlsx using the same columns as the import template."""
+    stmt, _ = _product_filter_stmts(
+        q=q, category_id=category_id, brand=brand, lifecycle=lifecycle
+    )
+    products = list(
+        db.scalars(
+            stmt.options(selectinload(Product.applicable_motorcycle_models)).order_by(
+                Product.name
+            )
+        ).all()
+    )
+    overlaid = _overlay_products(db, products, active_branch_id)
+    category_ids = {p.category_id for p in products if p.category_id is not None}
+    categories = {
+        c.id: c.name
+        for c in db.scalars(
+            select(ProductCategory).where(ProductCategory.id.in_(category_ids))
+        ).all()
+    } if category_ids else {}
+
+    motorcycle_names = [
+        m.display_name
+        for m in db.scalars(
+            select(MotorcycleModel)
+            .where(MotorcycleModel.is_active.is_(True))
+            .order_by(MotorcycleModel.brand, MotorcycleModel.name)
+        ).all()
+    ]
+
+    rows: list[list[object]] = []
+    for product, read in zip(products, overlaid, strict=True):
+        model_slots = models_to_export_slots(
+            [m.display_name for m in read.applicable_motorcycle_models]
+        )
+        rows.append(
+            [
+                read.barcode,
+                read.name,
+                read.brand or "",
+                categories.get(product.category_id, "") if product.category_id else "",
+                f"{read.cost_price:.2f}",
+                f"{read.current_selling_price:.2f}",
+                read.stock_qty,
+                read.min_stock_threshold,
+                *model_slots,
+            ]
+        )
+
+    content = build_export_xlsx(rows, list_brand_names(db), motorcycle_names)
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="inventory-export.xlsx"',
+        },
+    )
+
+
+@router.get("/products", response_model=PaginatedResponse[ProductRead])
+def list_products(
+    q: str | None = Query(default=None),
+    category_id: UUID | None = Query(default=None),
+    brand: str | None = Query(default=None),
+    lifecycle: ProductLifecycle = Query(default="active"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
+    active_branch_id: UUID = Depends(get_active_branch_id),
+) -> PaginatedResponse[ProductRead]:
+    stmt, count_stmt = _product_filter_stmts(
+        q=q, category_id=category_id, brand=brand, lifecycle=lifecycle
+    )
 
     total = db.scalar(count_stmt) or 0
     products = list(
         db.scalars(
-            stmt.order_by(Product.name)
+            stmt.options(selectinload(Product.applicable_motorcycle_models))
+            .order_by(Product.name)
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
@@ -333,10 +466,12 @@ def create_product(
     if body.category_id is not None and db.get(ProductCategory, body.category_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
 
-    product = Product(**body.model_dump())
+    payload = body.model_dump(exclude={"applicable_motorcycle_model_ids"})
+    product = Product(**payload)
     db.add(product)
     db.flush()
     ensure_product_brand(db, body.brand)
+    _set_applicable_motorcycle_models(db, product, body.applicable_motorcycle_model_ids)
 
     db.add(
         BranchStock(
@@ -361,11 +496,7 @@ def create_product(
 
     db.commit()
     db.refresh(product)
-    read = ProductRead.model_validate(product)
-    read.stock_qty = body.stock_qty
-    read.min_stock_threshold = body.min_stock_threshold
-    return read
-
+    return _overlay_products(db, [product], active_branch_id)[0]
 
 @router.get("/products/{product_id}", response_model=ProductRead)
 def get_product(
@@ -418,11 +549,14 @@ def update_product(
     # stock_qty on the active branch is managed via BranchStock / the /adjust
     # endpoint, not this catalog-level update.
     data.pop("stock_qty", None)
+    model_ids = data.pop("applicable_motorcycle_model_ids", None)
     selling_price = data.get("current_selling_price")
     for key, value in data.items():
         setattr(product, key, value)
     if "brand" in data:
         ensure_product_brand(db, data.get("brand"))
+    if model_ids is not None:
+        _set_applicable_motorcycle_models(db, product, model_ids)
     if "min_stock_threshold" in data:
         branch_stock = get_or_create_branch_stock(
             db, branch_id=active_branch_id, product=product

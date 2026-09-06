@@ -39,6 +39,15 @@ class ProductBrandRead(BaseModel):
     created_at: datetime
 
 
+class ProductMotorcycleModelRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    brand: str
+    name: str
+    display_name: str
+
+
 class ProductCreate(BaseModel):
     barcode: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=200)
@@ -50,6 +59,7 @@ class ProductCreate(BaseModel):
     min_stock_threshold: int = Field(default=0, ge=0)
     category_id: UUID | None = None
     is_active: bool = True
+    applicable_motorcycle_model_ids: list[UUID] = Field(default_factory=list)
 
     @field_validator("barcode")
     @classmethod
@@ -76,6 +86,7 @@ class ProductUpdate(BaseModel):
     category_id: UUID | None = None
     is_active: bool | None = None
     stock_qty: int | None = Field(default=None, ge=0)
+    applicable_motorcycle_model_ids: list[UUID] | None = None
 
     @field_validator("barcode")
     @classmethod
@@ -108,6 +119,9 @@ class ProductRead(BaseModel):
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    applicable_motorcycle_models: list[ProductMotorcycleModelRead] = Field(
+        default_factory=list
+    )
 
 
 class ProductDeletionImpact(BaseModel):
@@ -125,12 +139,13 @@ class ProductImportRowResult(BaseModel):
     row: int
     barcode: str | None = None
     name: str | None = None
-    status: Literal["created", "skipped", "error"]
+    status: Literal["created", "updated", "skipped", "error"]
     message: str
 
 
 class ProductImportResponse(BaseModel):
     created: int
+    updated: int = 0
     skipped: int
     errors: int
     rows: list[ProductImportRowResult]

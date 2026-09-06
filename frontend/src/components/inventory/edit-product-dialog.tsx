@@ -8,6 +8,7 @@ import {
   BarcodeLabelPrintDialog,
   type BarcodeLabelData,
 } from "@/components/inventory/barcode-label-print";
+import { ApplicableMotorcycleModelsField } from "@/components/inventory/applicable-motorcycle-models-field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -48,6 +49,7 @@ export function EditProductDialog({
   const [sellingPrice, setSellingPrice] = useState("");
   const [stockQty, setStockQty] = useState("");
   const [minStock, setMinStock] = useState("");
+  const [modelIds, setModelIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [printLabel, setPrintLabel] = useState<BarcodeLabelData | null>(null);
 
@@ -64,6 +66,16 @@ export function EditProductDialog({
     return names;
   }, [brands, brand]);
 
+  const initialModels = useMemo(
+    () =>
+      (product?.applicable_motorcycle_models ?? []).map((m) => ({
+        id: m.id,
+        display_name: m.display_name,
+        brand: m.brand,
+      })),
+    [product],
+  );
+
   useEffect(() => {
     if (!open || !product) return;
     setName(product.name);
@@ -73,6 +85,9 @@ export function EditProductDialog({
     setSellingPrice(product.current_selling_price);
     setStockQty(String(product.stock_qty));
     setMinStock(String(product.min_stock_threshold));
+    setModelIds(
+      (product.applicable_motorcycle_models ?? []).map((m) => m.id),
+    );
   }, [open, product]);
 
   async function createBrand() {
@@ -141,6 +156,7 @@ export function EditProductDialog({
           cost_price: cost.toFixed(2),
           current_selling_price: sell.toFixed(2),
           min_stock_threshold: nextMin,
+          applicable_motorcycle_model_ids: modelIds,
         }),
       });
 
@@ -260,6 +276,12 @@ export function EditProductDialog({
                 </Button>
               </div>
             </div>
+
+            <ApplicableMotorcycleModelsField
+              selectedIds={modelIds}
+              onChange={setModelIds}
+              initialModels={initialModels}
+            />
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
