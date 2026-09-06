@@ -30,7 +30,12 @@ import {
 } from "@/components/ui/select";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
 import { clientApi, toastError } from "@/lib/client-api";
+import { fetchAllProducts } from "@/lib/fetch-products";
 import { printJobDocument } from "@/lib/print-job-document";
+import {
+  formatProductFits,
+  productFitmentKeywords,
+} from "@/lib/product-fitment";
 import type { Mechanic, Paginated, Product, Transaction } from "@/lib/types";
 import { formatPeso } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -225,15 +230,15 @@ export default function JobDetailPage() {
       const [detail, mechs, prods] = await Promise.all([
         clientApi<Transaction>(`/transactions/${id}`),
         clientApi<Mechanic[]>("/mechanics"),
-        clientApi<Paginated<Product>>("/products?page_size=100&lifecycle=all"),
+        fetchAllProducts({ query: "lifecycle=all" }),
       ]);
       setTx(detail);
       setMechanics(mechs.filter((m) => m.is_active));
-      setProducts(prods.items);
+      setProducts(prods);
       setProductId(
         (current) =>
           current ||
-          prods.items.find((p) => p.is_active && !p.deleted_at)?.id ||
+          prods.find((p) => p.is_active && !p.deleted_at)?.id ||
           "",
       );
     } catch (err) {
@@ -633,15 +638,25 @@ export default function JobDetailPage() {
                     if (product) applyProductSelection(product);
                     else setProductId(next);
                   }}
-                  placeholder="Search name or barcode…"
-                  searchPlaceholder="Type product name or barcode…"
+                  placeholder="Search name, barcode, or model…"
+                  searchPlaceholder="Type product name, barcode, or model…"
                   emptyText="No products match."
-                  options={selectableProducts.map((p) => ({
-                    value: p.id,
-                    label: p.name,
-                    description: `${p.barcode} · ${formatPeso(p.current_selling_price)} · stock ${p.stock_qty}`,
-                    keywords: `${p.barcode} ${p.name}`,
-                  }))}
+                  options={selectableProducts.map((p) => {
+                    const fits = formatProductFits(
+                      p.applicable_motorcycle_models,
+                    );
+                    return {
+                      value: p.id,
+                      label: p.name,
+                      description: [
+                        `${p.barcode} · ${formatPeso(p.current_selling_price)} · stock ${p.stock_qty}`,
+                        fits,
+                      ]
+                        .filter(Boolean)
+                        .join(" · "),
+                      keywords: `${p.barcode} ${p.name} ${p.brand ?? ""} ${productFitmentKeywords(p)}`,
+                    };
+                  })}
                 />
 
                 <div className="space-y-2">
@@ -856,6 +871,14 @@ export default function JobDetailPage() {
                       {product ? (
                         <span className="block truncate text-xs text-muted-foreground">
                           {product.barcode}
+                        </span>
+                      ) : null}
+                      {product &&
+                      formatProductFits(product.applicable_motorcycle_models) ? (
+                        <span className="block text-xs text-muted-foreground">
+                          {formatProductFits(
+                            product.applicable_motorcycle_models,
+                          )}
                         </span>
                       ) : null}
                       <span className="text-muted-foreground">

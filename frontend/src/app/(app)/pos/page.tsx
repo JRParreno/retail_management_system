@@ -10,6 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { clientApi, toastError } from "@/lib/client-api";
+import { fetchAllProducts } from "@/lib/fetch-products";
+import {
+  formatProductFits,
+  productFitmentKeywords,
+} from "@/lib/product-fitment";
 import type { Paginated, Product } from "@/lib/types";
 import { formatPeso } from "@/lib/types";
 import { useBarcodeScanner } from "@/hooks/use-barcode-scanner";
@@ -25,8 +30,8 @@ export default function PosPage() {
   const [payOpen, setPayOpen] = useState(false);
 
   useEffect(() => {
-    clientApi<Paginated<Product>>("/products?page_size=100")
-      .then((res) => setProducts(res.items))
+    fetchAllProducts()
+      .then(setProducts)
       .catch(toastError);
   }, []);
 
@@ -115,12 +120,15 @@ export default function PosPage() {
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     if (!term) return products;
-    return products.filter(
-      (p) =>
+    return products.filter((p) => {
+      const fits = productFitmentKeywords(p).toLowerCase();
+      return (
         p.name.toLowerCase().includes(term) ||
         p.barcode.toLowerCase().includes(term) ||
-        (p.brand?.toLowerCase().includes(term) ?? false),
-    );
+        (p.brand?.toLowerCase().includes(term) ?? false) ||
+        fits.includes(term)
+      );
+    });
   }, [products, q]);
 
   const total = cart.reduce(
@@ -172,7 +180,7 @@ export default function PosPage() {
           <div className="relative">
             <Input
               className="min-h-11"
-              placeholder="Search name, brand, or barcode"
+              placeholder="Search name, brand, barcode, or model"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -191,6 +199,11 @@ export default function PosPage() {
                   {p.brand ? `${p.brand} · ` : ""}
                   {p.barcode}
                 </p>
+                {formatProductFits(p.applicable_motorcycle_models) ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatProductFits(p.applicable_motorcycle_models)}
+                  </p>
+                ) : null}
                 <div className="mt-2 flex justify-between text-sm">
                   <span>{formatPeso(p.current_selling_price)}</span>
                   <span className="text-muted-foreground">
@@ -217,6 +230,15 @@ export default function PosPage() {
                       {formatPeso(line.product.current_selling_price)} each ·
                       stock {line.product.stock_qty}
                     </p>
+                    {formatProductFits(
+                      line.product.applicable_motorcycle_models,
+                    ) ? (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {formatProductFits(
+                          line.product.applicable_motorcycle_models,
+                        )}
+                      </p>
+                    ) : null}
                   </div>
                   <p className="shrink-0 tabular-nums font-medium">
                     {formatPeso(

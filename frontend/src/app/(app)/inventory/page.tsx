@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   ChevronLeft,
   ChevronRight,
   FileDown,
@@ -43,11 +46,55 @@ import type {
   ProductDeletionImpact,
 } from "@/lib/types";
 import { formatPeso } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 type ProductLifecycle = "active" | "disabled" | "deleted" | "all";
+type SortBy =
+  | "name"
+  | "brand"
+  | "category"
+  | "barcode"
+  | "price"
+  | "stock"
+  | "status";
+type SortDir = "asc" | "desc";
 
-const PAGE_SIZE_OPTIONS = [10, 100, 500] as const;
+const PAGE_SIZE_OPTIONS = [10, 100, 500, 1000] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
+
+function SortableTh({
+  label,
+  column,
+  sortBy,
+  sortDir,
+  onSort,
+  className,
+}: {
+  label: string;
+  column: SortBy;
+  sortBy: SortBy;
+  sortDir: SortDir;
+  onSort: (column: SortBy) => void;
+  className?: string;
+}) {
+  const active = sortBy === column;
+  const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <th className={cn("px-3 py-2.5 font-medium", className)}>
+      <button
+        type="button"
+        className={cn(
+          "inline-flex items-center gap-1 rounded-md text-left transition-colors hover:text-foreground",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+        onClick={() => onSort(column)}
+      >
+        <span>{label}</span>
+        <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />
+      </button>
+    </th>
+  );
+}
 
 function formatSnapshotDate(date: Date) {
   return date.toLocaleString("en-PH", {
@@ -91,6 +138,8 @@ export default function InventoryPage() {
   const [categoryId, setCategoryId] = useState<string>("all");
   const [brand, setBrand] = useState<string>("all");
   const [lifecycle, setLifecycle] = useState<ProductLifecycle>("active");
+  const [sortBy, setSortBy] = useState<SortBy>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [snapshotAt, setSnapshotAt] = useState(() => new Date());
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -106,6 +155,12 @@ export default function InventoryPage() {
   }, [categories, categoryId]);
 
   const brandLabel = brand === "all" ? "All brands" : brand;
+
+  const categoryById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of categories) map.set(c.id, c.name);
+    return map;
+  }, [categories]);
 
   const filterSummary = useMemo(() => {
     const parts = [brandLabel, categoryName, `Status: ${lifecycle}`];
@@ -133,6 +188,8 @@ export default function InventoryPage() {
     if (categoryId !== "all") params.set("category_id", categoryId);
     if (brand !== "all") params.set("brand", brand);
     params.set("lifecycle", lifecycle);
+    params.set("sort_by", sortBy);
+    params.set("sort_dir", sortDir);
     return params;
   }
 
@@ -158,6 +215,13 @@ export default function InventoryPage() {
       setBrands(brandList);
       setSnapshotAt(new Date());
     } catch (err) {
+      // Older APIs capped page_size at 500 — fall back without breaking the page.
+      if (size > 500) {
+        setPageSize(500);
+        setPage(1);
+        toast.error("This server supports up to 500 rows per page.");
+        return;
+      }
       toastError(err);
     }
   }
@@ -186,10 +250,20 @@ export default function InventoryPage() {
   useEffect(() => {
     void load(page, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, pageSize, categoryId, brand, lifecycle]);
+  }, [page, pageSize, categoryId, brand, lifecycle, sortBy, sortDir]);
 
   function changePageSize(next: PageSize) {
     setPageSize(next);
+    setPage(1);
+  }
+
+  function toggleSort(column: SortBy) {
+    if (sortBy === column) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortBy(column);
+      setSortDir("asc");
+    }
     setPage(1);
   }
 
@@ -486,26 +560,72 @@ export default function InventoryPage() {
         </Button>
       </div>
 
-      <div className="report-screen-only overflow-x-auto rounded-xl border bg-card">
-        <table className="w-full min-w-[720px] text-left text-sm">
-          <thead className="border-b bg-muted/40">
+      <div className="report-screen-only max-h-[min(65dvh,36rem)] overflow-auto rounded-xl border bg-card">
+        <table className="w-full min-w-[960px] border-collapse text-left text-sm">
+          <thead className="sticky top-0 z-10 border-b bg-muted/95 backdrop-blur">
             <tr>
-              <th className="px-3 py-3">Product</th>
-              <th className="px-3 py-3">Brand</th>
-              <th className="px-3 py-3">Barcode</th>
-              <th className="px-3 py-3">Price</th>
-              <th className="px-3 py-3">Stock</th>
-              <th className="px-3 py-3">Status</th>
-              <th className="px-3 py-3" />
+              <SortableTh
+                label="Product"
+                column="name"
+                sortBy={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableTh
+                label="Brand"
+                column="brand"
+                sortBy={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableTh
+                label="Category"
+                column="category"
+                sortBy={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableTh
+                label="Barcode"
+                column="barcode"
+                sortBy={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableTh
+                label="Price"
+                column="price"
+                sortBy={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableTh
+                label="Stock"
+                column="stock"
+                sortBy={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
+              <SortableTh
+                label="Status"
+                column="status"
+                sortBy={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+              />
+              <th className="px-3 py-2.5 font-medium" />
             </tr>
           </thead>
           <tbody>
             {items.map((p) => (
-              <tr key={p.id} className="border-b last:border-0">
-                <td className="px-3 py-3 font-medium">
-                  <div>{p.name}</div>
+              <tr
+                key={p.id}
+                className="border-b last:border-0 transition-colors hover:bg-accent/70"
+              >
+                <td className="px-3 py-2 align-middle font-medium">
+                  <div className="leading-snug">{p.name}</div>
                   {(p.applicable_motorcycle_models ?? []).length > 0 ? (
-                    <p className="mt-1 text-xs font-normal text-muted-foreground">
+                    <p className="mt-0.5 text-xs font-normal leading-snug text-muted-foreground">
                       Fits:{" "}
                       {(p.applicable_motorcycle_models ?? [])
                         .map((m) => m.display_name)
@@ -513,22 +633,29 @@ export default function InventoryPage() {
                     </p>
                   ) : null}
                 </td>
-                <td className="px-3 py-3 text-muted-foreground">
+                <td className="px-3 py-2 align-middle text-muted-foreground">
                   {p.brand ?? "—"}
                 </td>
-                <td className="px-3 py-3 text-muted-foreground">{p.barcode}</td>
-                <td className="px-3 py-3 tabular-nums">
+                <td className="px-3 py-2 align-middle text-muted-foreground">
+                  {p.category_id
+                    ? (categoryById.get(p.category_id) ?? "—")
+                    : "—"}
+                </td>
+                <td className="px-3 py-2 align-middle font-mono text-xs text-muted-foreground">
+                  {p.barcode}
+                </td>
+                <td className="px-3 py-2 align-middle tabular-nums">
                   {formatPeso(p.current_selling_price)}
                 </td>
-                <td className="px-3 py-3">
-                  <div className="flex items-center gap-2">
+                <td className="px-3 py-2 align-middle">
+                  <div className="flex items-center gap-1.5">
                     <span className="tabular-nums">{p.stock_qty}</span>
                     {p.stock_qty <= p.min_stock_threshold ? (
                       <Badge variant="destructive">Low</Badge>
                     ) : null}
                   </div>
                 </td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-2 align-middle">
                   {p.deleted_at ? (
                     <Badge variant="destructive">Deleted</Badge>
                   ) : p.is_active ? (
@@ -537,11 +664,12 @@ export default function InventoryPage() {
                     <Badge variant="secondary">Disabled</Badge>
                   )}
                 </td>
-                <td className="px-3 py-3 text-right">
-                  <div className="flex flex-wrap justify-end gap-2">
+                <td className="px-2 py-2 align-middle text-right">
+                  <div className="inline-flex flex-nowrap items-center justify-end gap-1">
                     <Button
-                      size="sm"
+                      size="xs"
                       variant="outline"
+                      className="h-8 shrink-0"
                       onClick={() =>
                         setPrintLabel({
                           barcode: p.barcode,
@@ -549,7 +677,7 @@ export default function InventoryPage() {
                         })
                       }
                     >
-                      <Printer className="size-3.5" />
+                      <Printer className="size-3" />
                       Label
                     </Button>
                     {isAdmin ? (
@@ -557,8 +685,9 @@ export default function InventoryPage() {
                         {!p.deleted_at ? (
                           <>
                             <Button
-                              size="sm"
+                              size="xs"
                               variant="outline"
+                              className="h-8 shrink-0"
                               disabled={lifecycleBusyId === p.id}
                               onClick={() =>
                                 void setProductEnabled(p, !p.is_active)
@@ -567,40 +696,44 @@ export default function InventoryPage() {
                               {p.is_active ? "Disable" : "Enable"}
                             </Button>
                             <Button
-                              size="sm"
+                              size="xs"
                               variant="outline"
+                              className="h-8 shrink-0"
                               onClick={() => setEditProduct(p)}
                             >
                               Edit
                             </Button>
                             <Button
-                              size="sm"
+                              size="xs"
                               variant="destructive"
+                              className="h-8 shrink-0"
                               disabled={lifecycleBusyId === p.id}
                               onClick={() => void softDeleteProduct(p)}
                             >
-                              <Trash2 className="size-3.5" />
+                              <Trash2 className="size-3" />
                               Delete
                             </Button>
                           </>
                         ) : (
                           <>
                             <Button
-                              size="sm"
+                              size="xs"
                               variant="outline"
+                              className="h-8 shrink-0"
                               disabled={lifecycleBusyId === p.id}
                               onClick={() => void restoreProduct(p)}
                             >
-                              <RotateCcw className="size-3.5" />
+                              <RotateCcw className="size-3" />
                               Restore
                             </Button>
                             <Button
-                              size="sm"
+                              size="xs"
                               variant="destructive"
+                              className="h-8 shrink-0"
                               disabled={lifecycleBusyId === p.id}
                               onClick={() => void hardDeleteProduct(p)}
                             >
-                              <Trash2 className="size-3.5" />
+                              <Trash2 className="size-3" />
                               Permanent
                             </Button>
                           </>
@@ -613,7 +746,7 @@ export default function InventoryPage() {
             ))}
             {!items.length ? (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-muted-foreground">
+                <td colSpan={8} className="px-3 py-6 text-muted-foreground">
                   No products match these filters.
                 </td>
               </tr>
@@ -704,6 +837,7 @@ export default function InventoryPage() {
               <th>#</th>
               <th>Product</th>
               <th>Brand</th>
+              <th>Category</th>
               <th>Barcode</th>
               <th>System qty</th>
               <th>Physical count</th>
@@ -720,6 +854,11 @@ export default function InventoryPage() {
                   {p.stock_qty <= p.min_stock_threshold ? " ★" : ""}
                 </td>
                 <td>{p.brand ?? "—"}</td>
+                <td>
+                  {p.category_id
+                    ? (categoryById.get(p.category_id) ?? "—")
+                    : "—"}
+                </td>
                 <td>{p.barcode}</td>
                 <td className="inventory-qty">{p.stock_qty}</td>
                 <td className="inventory-blank" />

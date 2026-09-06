@@ -20,6 +20,7 @@ class ProductSalesRow(BaseModel):
     product_name: str
     barcode: str
     brand: str | None = None
+    applicable_models: list[str] = Field(default_factory=list)
     quantity_sold: int
     sales_total: Decimal
     cogs_total: Decimal

@@ -107,6 +107,26 @@ def _normalize_brand_list(brand_names: list[str] | None) -> list[str]:
     return brands
 
 
+def _normalize_category_list(category_names: list[str] | None) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for raw in category_names or []:
+        name = raw.strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    # Keep example rows valid even if catalog is empty.
+    for example in ("Brakes", "Parts"):
+        if example.casefold() not in seen:
+            names.append(example)
+            seen.add(example.casefold())
+    return names
+
+
 def _normalize_model_list(model_names: list[str] | None) -> list[str]:
     names: list[str] = []
     seen: set[str] = set()
@@ -130,6 +150,7 @@ def _normalize_model_list(model_names: list[str] | None) -> list[str]:
 def _style_products_sheet(
     ws: Worksheet,
     brand_names: list[str],
+    category_names: list[str],
     model_names: list[str],
     data_row_count: int,
 ) -> None:
@@ -140,6 +161,13 @@ def _style_products_sheet(
         brands_ws.append([name])
     brands_ws.column_dimensions["A"].width = 20
 
+    categories_ws = ws.parent.create_sheet("Categories")
+    categories_ws.append(["category"])
+    categories_ws["A1"].font = Font(bold=True)
+    for name in category_names:
+        categories_ws.append([name])
+    categories_ws.column_dimensions["A"].width = 20
+
     models_ws = ws.parent.create_sheet("MotorcycleModels")
     models_ws.append(["display_name"])
     models_ws["A1"].font = Font(bold=True)
@@ -147,9 +175,10 @@ def _style_products_sheet(
         models_ws.append([name])
     models_ws.column_dimensions["A"].width = 28
 
+    last_data_row = max(data_row_count, MAX_IMPORT_ROWS) + 1
+
     # Brand dropdown on Products!C (allow blank for unbranded items).
     last_brand_row = max(2, len(brand_names) + 1)
-    last_data_row = max(data_row_count, MAX_IMPORT_ROWS) + 1
     dv = DataValidation(
         type="list",
         formula1=f"Brands!$A$2:$A${last_brand_row}",
@@ -162,6 +191,23 @@ def _style_products_sheet(
     dv.promptTitle = "Brand"
     ws.add_data_validation(dv)
     dv.add(f"C2:C{last_data_row}")
+
+    # Category dropdown on Products!D (blank = no category / null).
+    # showErrorMessage=False so staff can type a new category name to create on import.
+    last_category_row = max(2, len(category_names) + 1)
+    dv_categories = DataValidation(
+        type="list",
+        formula1=f"Categories!$A$2:$A${last_category_row}",
+        allow_blank=True,
+        showDropDown=False,
+        showErrorMessage=False,
+    )
+    dv_categories.prompt = (
+        "Pick a category from the list, type a new name to create it, or leave blank."
+    )
+    dv_categories.promptTitle = "Category"
+    ws.add_data_validation(dv_categories)
+    dv_categories.add(f"D2:D{last_data_row}")
 
     # One dropdown per model slot (Excel cannot multi-select in a single cell).
     last_model_row = max(2, len(model_names) + 1)
@@ -202,9 +248,11 @@ def _style_products_sheet(
 
 def build_import_template(
     brand_names: list[str] | None = None,
+    category_names: list[str] | None = None,
     motorcycle_model_names: list[str] | None = None,
 ) -> bytes:
     brands = _normalize_brand_list(brand_names)
+    categories = _normalize_category_list(category_names)
     models = _normalize_model_list(motorcycle_model_names)
 
     wb = Workbook()
@@ -215,7 +263,9 @@ def build_import_template(
         cell.font = Font(bold=True)
     ws.append(EXAMPLE_ROW)
     ws.append(EXAMPLE_ROW_NO_BARCODE)
-    _style_products_sheet(ws, brands, models, data_row_count=2)
+    _style_products_sheet(
+        ws, brands, categories, models, data_row_count=2
+    )
 
     buf = BytesIO()
     wb.save(buf)
@@ -225,18 +275,25 @@ def build_import_template(
 def build_export_xlsx(
     rows: list[list[Any]],
     brand_names: list[str] | None = None,
+    category_names: list[str] | None = None,
     motorcycle_model_names: list[str] | None = None,
 ) -> bytes:
     """Build an .xlsx using the same columns as the import template."""
     brands = _normalize_brand_list(brand_names)
+    categories = _normalize_category_list(category_names)
     models = _normalize_model_list(motorcycle_model_names)
     seen_brands = {b.casefold() for b in brands}
+    seen_categories = {c.casefold() for c in categories}
     seen_models = {m.casefold() for m in models}
     for row in rows:
         brand = _cell_str(row[2]) if len(row) > 2 else ""
         if brand and brand.casefold() not in seen_brands:
             brands.append(brand)
             seen_brands.add(brand.casefold())
+        category = _cell_str(row[3]) if len(row) > 3 else ""
+        if category and category.casefold() not in seen_categories:
+            categories.append(category)
+            seen_categories.add(category.casefold())
         for offset in range(APPLICABLE_MODEL_SLOTS):
             idx = 8 + offset
             if len(row) <= idx:
@@ -254,7 +311,9 @@ def build_export_xlsx(
         cell.font = Font(bold=True)
     for row in rows:
         ws.append(row)
-    _style_products_sheet(ws, brands, models, data_row_count=len(rows))
+    _style_products_sheet(
+        ws, brands, categories, models, data_row_count=len(rows)
+    )
 
     buf = BytesIO()
     wb.save(buf)
@@ -410,7 +469,7 @@ def _header_map(ws: Worksheet) -> dict[str, int]:
             mapping[key] = idx
     missing = [
         h
-        for h in ("barcode", "name", "category", "cost_price", "current_selling_price")
+        for h in ("barcode", "name", "cost_price", "current_selling_price")
         if h not in mapping
     ]
     if missing:
@@ -448,7 +507,7 @@ def _create_product_row(
     barcode: str,
     name: str,
     brand: str | None,
-    category_id: UUID,
+    category_id: UUID | None,
     cost_price: Decimal,
     selling_price: Decimal,
     stock_qty: int,
@@ -573,9 +632,7 @@ def import_products_from_xlsx(
                 raise ValueError("name is required")
             if len(name) > 200:
                 raise ValueError("name must be at most 200 characters")
-            if not category_name:
-                raise ValueError("category is required")
-            if len(category_name) > 100:
+            if category_name and len(category_name) > 100:
                 raise ValueError("category must be at most 100 characters")
             if not cost_raw:
                 raise ValueError("cost_price is required")
@@ -695,7 +752,10 @@ def import_products_from_xlsx(
             seen_barcodes.add(barcode)
             seen_name_brand.add(identity)
 
-            category = _get_or_create_category(db, category_name, category_cache)
+            category_id = None
+            if category_name:
+                category = _get_or_create_category(db, category_name, category_cache)
+                category_id = category.id
             product = _create_product_row(
                 db,
                 active_branch_id=active_branch_id,
@@ -703,7 +763,7 @@ def import_products_from_xlsx(
                 barcode=barcode,
                 name=name,
                 brand=brand,
-                category_id=category.id,
+                category_id=category_id,
                 cost_price=cost_price,
                 selling_price=selling_price,
                 stock_qty=stock_qty,

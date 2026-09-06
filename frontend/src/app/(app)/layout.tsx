@@ -20,7 +20,7 @@ export default async function AppLayout({
         <div className="flex h-dvh max-h-dvh flex-col overflow-hidden lg:flex-row">
           <AppSidebar user={user} />
           <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain">
-            <div className="mx-auto w-full max-w-7xl p-3 sm:p-4 lg:p-6">
+            <div className="w-full p-3 sm:p-4 lg:p-6">
               {children}
             </div>
           </main>

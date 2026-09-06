@@ -399,6 +399,7 @@ export type ProductSalesRow = {
   product_name: string;
   barcode: string;
   brand: string | null;
+  applicable_models?: string[];
   quantity_sold: number;
   sales_total: string;
   cogs_total: string;

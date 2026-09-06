@@ -188,19 +188,27 @@ def report_summary(
         products = {
             p.id: p
             for p in db.scalars(
-                select(Product).where(Product.id.in_(product_totals.keys()))
+                select(Product)
+                .options(selectinload(Product.applicable_motorcycle_models))
+                .where(Product.id.in_(product_totals.keys()))
             ).all()
         }
         for product_id, totals in product_totals.items():
             product = products.get(product_id)
             sales_total = totals["sales_total"]  # type: ignore[assignment]
             cogs_total = totals["cogs_total"]  # type: ignore[assignment]
+            applicable_models = (
+                [m.display_name for m in (getattr(product, "applicable_motorcycle_models", None) or [])]
+                if product
+                else []
+            )
             product_sales.append(
                 ProductSalesRow(
                     product_id=product_id,
                     product_name=product.name if product else "Unknown product",
                     barcode=product.barcode if product else "—",
                     brand=product.brand if product else None,
+                    applicable_models=applicable_models,
                     quantity_sold=int(totals["quantity_sold"]),
                     sales_total=sales_total,
                     cogs_total=cogs_total,

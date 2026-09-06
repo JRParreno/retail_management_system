@@ -4,7 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -47,6 +47,10 @@ from app.services.stock import get_or_create_branch_stock
 router = APIRouter(tags=["products"])
 
 ProductLifecycle = Literal["active", "disabled", "deleted", "all"]
+ProductSortBy = Literal[
+    "name", "brand", "category", "barcode", "price", "stock", "status"
+]
+ProductSortDir = Literal["asc", "desc"]
 
 
 def _apply_lifecycle(stmt, lifecycle: ProductLifecycle):
@@ -100,7 +104,7 @@ def _overlay_products(
                 name=m.name,
                 display_name=m.display_name,
             )
-            for m in product.applicable_motorcycle_models
+            for m in (getattr(product, "applicable_motorcycle_models", None) or [])
         ]
         results.append(read)
     return results
@@ -281,7 +285,15 @@ def download_product_import_template(
             .order_by(MotorcycleModel.brand, MotorcycleModel.name)
         ).all()
     ]
-    content = build_import_template(list_brand_names(db), motorcycle_names)
+    category_names = [
+        c.name
+        for c in db.scalars(select(ProductCategory).order_by(ProductCategory.name)).all()
+    ]
+    content = build_import_template(
+        list_brand_names(db),
+        category_names,
+        motorcycle_names,
+    )
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -386,6 +398,10 @@ def export_products(
             .order_by(MotorcycleModel.brand, MotorcycleModel.name)
         ).all()
     ]
+    category_names = [
+        c.name
+        for c in db.scalars(select(ProductCategory).order_by(ProductCategory.name)).all()
+    ]
 
     rows: list[list[object]] = []
     for product, read in zip(products, overlaid, strict=True):
@@ -406,7 +422,12 @@ def export_products(
             ]
         )
 
-    content = build_export_xlsx(rows, list_brand_names(db), motorcycle_names)
+    content = build_export_xlsx(
+        rows,
+        list_brand_names(db),
+        category_names,
+        motorcycle_names,
+    )
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -422,8 +443,10 @@ def list_products(
     category_id: UUID | None = Query(default=None),
     brand: str | None = Query(default=None),
     lifecycle: ProductLifecycle = Query(default="active"),
+    sort_by: ProductSortBy = Query(default="name"),
+    sort_dir: ProductSortDir = Query(default="asc"),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=500),
+    page_size: int = Query(default=20, ge=1, le=1000),
     db: Session = Depends(get_db),
     _: User = Depends(require_role(Role.ADMIN, Role.CASHIER)),
     active_branch_id: UUID = Depends(get_active_branch_id),
@@ -432,11 +455,54 @@ def list_products(
         q=q, category_id=category_id, brand=brand, lifecycle=lifecycle
     )
 
+    if sort_by == "category":
+        stmt = stmt.outerjoin(
+            ProductCategory, Product.category_id == ProductCategory.id
+        )
+        order_col = ProductCategory.name
+    elif sort_by == "stock":
+        stmt = stmt.outerjoin(
+            BranchStock,
+            and_(
+                BranchStock.product_id == Product.id,
+                BranchStock.branch_id == active_branch_id,
+            ),
+        )
+        order_col = func.coalesce(BranchStock.stock_qty, Product.stock_qty)
+    elif sort_by == "price":
+        stmt = stmt.outerjoin(
+            BranchPrice,
+            and_(
+                BranchPrice.product_id == Product.id,
+                BranchPrice.branch_id == active_branch_id,
+            ),
+        )
+        order_col = func.coalesce(
+            BranchPrice.selling_price, Product.current_selling_price
+        )
+    elif sort_by == "brand":
+        order_col = Product.brand
+    elif sort_by == "barcode":
+        order_col = Product.barcode
+    elif sort_by == "status":
+        order_col = case(
+            (Product.deleted_at.is_not(None), 2),
+            (Product.is_active.is_(False), 1),
+            else_=0,
+        )
+    else:
+        order_col = Product.name
+
+    if sort_dir == "desc":
+        primary = order_col.desc().nulls_last()
+    else:
+        primary = order_col.asc().nulls_last()
+
     total = db.scalar(count_stmt) or 0
     products = list(
         db.scalars(
             stmt.options(selectinload(Product.applicable_motorcycle_models))
-            .order_by(Product.name)
+            .order_by(primary, Product.name.asc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
@@ -448,7 +514,6 @@ def list_products(
         page=page,
         page_size=page_size,
     )
-
 
 @router.post("/products", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
 def create_product(

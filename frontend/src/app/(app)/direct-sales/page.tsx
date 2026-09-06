@@ -185,12 +185,15 @@ export default function DirectSalesPage() {
     const rows = summary?.product_sales ?? [];
     const term = q.trim().toLowerCase();
     if (!term) return rows;
-    return rows.filter(
-      (row) =>
+    return rows.filter((row) => {
+      const fits = (row.applicable_models ?? []).join(" ").toLowerCase();
+      return (
         row.product_name.toLowerCase().includes(term) ||
         row.barcode.toLowerCase().includes(term) ||
-        (row.brand?.toLowerCase().includes(term) ?? false),
-    );
+        (row.brand?.toLowerCase().includes(term) ?? false) ||
+        fits.includes(term)
+      );
+    });
   }, [summary, q]);
 
   const totalQty = useMemo(
@@ -357,7 +360,7 @@ export default function DirectSalesPage() {
             </div>
             <Input
               className="no-print min-h-11 sm:max-w-xs"
-              placeholder="Search product, brand, barcode"
+              placeholder="Search product, brand, barcode, or model"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
@@ -392,6 +395,11 @@ export default function DirectSalesPage() {
                         {row.brand ? (
                           <p className="text-xs text-muted-foreground">
                             {row.brand}
+                          </p>
+                        ) : null}
+                        {(row.applicable_models ?? []).length > 0 ? (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Fits: {(row.applicable_models ?? []).join(", ")}
                           </p>
                         ) : null}
                       </td>
@@ -581,6 +589,9 @@ export default function DirectSalesPage() {
                   <td>
                     {row.product_name}
                     {row.brand ? ` (${row.brand})` : ""}
+                    {(row.applicable_models ?? []).length > 0
+                      ? ` — Fits: ${(row.applicable_models ?? []).join(", ")}`
+                      : ""}
                   </td>
                   <td>{row.barcode}</td>
                   <td>{row.quantity_sold}</td>

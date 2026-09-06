@@ -137,9 +137,10 @@ export function ImportProductsDialog({
           <div className="rounded-lg border border-dashed p-4">
             <p className="text-sm font-medium">1. Download the template</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Keep the barcode column as text. Brand and each applicable model
-              column have dropdowns — pick one model per column (e.g. Click in
-              model 1, Wave in model 2). Leave unused model columns blank.
+              Keep the barcode column as text. Brand, category, and each
+              applicable model column have dropdowns (see Brands, Categories,
+              MotorcycleModels sheets). Category may be left blank. Pick one
+              motorcycle model per column; leave unused model columns blank.
             </p>
             <Button
               type="button"
