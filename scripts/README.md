@@ -27,6 +27,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 | `prod_menu.py` | Ubuntu day-to-day ops (systemd / Nginx / deploy / logs) |
 | `ubuntu_https_setup.py` | First-time Ubuntu Nginx + systemd edge |
 | `db_backup.py` | Postgres dump / restore / nightly schedule |
+| `delete_all_products.ps1` / `.sh` / `.bat` | Hard-delete every product (yes/no prompts) |
 | `platform_util.py` | Shared Windows + Linux helpers (ports, venv, firewall, certs) |
 
 Direct invoke:
@@ -35,6 +36,10 @@ Direct invoke:
 python scripts/dev_menu.py 5
 python scripts/prod_deploy.py --skip-build
 python scripts/db_backup.py status
+# Hard-delete all products (asks yes/no twice):
+./scripts/delete_all_products.sh
+# Windows:
+.\scripts\delete_all_products.ps1
 ```
 
 ## Docs

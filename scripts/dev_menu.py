@@ -587,6 +587,16 @@ def action_seed_admin() -> None:
     run([str(py_exe()), "-m", "app.scripts.seed_admin"], cwd=BACKEND)
 
 
+def action_delete_all_products() -> None:
+    """Hard-delete every product (interactive yes/no prompts)."""
+    ensure_postgres()
+    ensure_backend_venv()
+    print(
+        "WARNING: Hard-deletes ALL products and linked stock/sales line history."
+    )
+    run([str(py_exe()), "-m", "app.scripts.delete_all_products"], cwd=BACKEND)
+
+
 def action_backend() -> None:
     ensure_backend_venv()
     free_dev_ports(ports=(DEV_API_PORT,))
@@ -684,6 +694,7 @@ MENU = """
 ║  8) Status check                         ║
 ║  9) Seed / reset ADMIN only              ║
 ║  A) Open LAN firewall ports              ║
+║  B) Hard-delete ALL products (yes/no)    ║
 ║  0) Exit                                 ║
 ╚══════════════════════════════════════════╝
 """
@@ -703,6 +714,8 @@ def main() -> None:
         "9": action_seed_admin,
         "a": action_open_lan_firewall,
         "A": action_open_lan_firewall,
+        "b": action_delete_all_products,
+        "B": action_delete_all_products,
     }
 
     if len(sys.argv) > 1:
